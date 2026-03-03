@@ -11,6 +11,19 @@ export function setUpliftMult(m) { _upliftMult = m > 0 ? m : 1; }
 let _hasLiquidOcean = true;
 export function setHasLiquidOcean(v) { _hasLiquidOcean = !!v; }
 
+// Base temperature (°C) for the current planet (default = Earth 15°C).
+// Used to select palette sub-variants within alien/arid/barren/ice modes.
+let _baseTemp = 15;
+export function setBaseTemp(v) { _baseTemp = typeof v === 'number' ? v : 15; }
+
+// Atmosphere level (0–5) for the current planet (default = Earth 3).
+let _atmosphere = 3;
+export function setAtmosphere(v) { _atmosphere = (typeof v === 'number' && v >= 0) ? v : 3; }
+
+// Hydrosphere level (0–5) for the current planet (default = Earth 3).
+let _hydrosphere = 3;
+export function setHydrosphere(v) { _hydrosphere = (typeof v === 'number' && v >= 0) ? v : 3; }
+
 // Convert raw mesh elevation (nonlinear, 0-~1 for land at 1g) to physical height
 // in kilometres.  Smooth power curve: ramps slowly through lowlands,
 // accelerates into highlands.  Scales with gravity — max is 6*upliftMult km.
@@ -131,39 +144,103 @@ function earthBiomeColor(koppenId, elevation) {
 // Alternate world-type palettes
 // ---------------------------------------------------------------------------
 
-/** Barren world (no atmosphere): greyscale rocky surface, no biome hues. */
+/**
+ * Barren world (no atmosphere): rocky surface, elevation-shaded only.
+ * Hot barren (>150°C): Mercury-like warm tan regolith, bright reflective peaks.
+ * Cold barren (<-50°C): Moon-like grey-blue rock, subtle cold tint at altitude.
+ * Default: neutral mid-grey with faint warm dust at low elevations.
+ */
 function barrenColor(elevation) {
-    if (elevation < -0.40) return [0.06, 0.05, 0.06];
+    const isHot  = _baseTemp > 150;
+    const isCold = _baseTemp < -50;
+
+    if (elevation < -0.40) {
+        if (isHot)  return [0.14, 0.12, 0.09];
+        if (isCold) return [0.05, 0.05, 0.08];
+        return [0.06, 0.05, 0.06];
+    }
     if (elevation < -0.10) {
         const t = (elevation + 0.40) / 0.30;
+        if (isHot)  return [0.14 + t * 0.14, 0.12 + t * 0.12, 0.09 + t * 0.09];
+        if (isCold) return [0.05 + t * 0.10, 0.05 + t * 0.10, 0.08 + t * 0.10];
         return [0.06 + t * 0.10, 0.05 + t * 0.10, 0.06 + t * 0.09];
     }
     if (elevation < 0.00) {
         const t = (elevation + 0.10) / 0.10;
+        if (isHot)  return [0.28 + t * 0.14, 0.24 + t * 0.12, 0.18 + t * 0.10];
+        if (isCold) return [0.15 + t * 0.08, 0.15 + t * 0.07, 0.18 + t * 0.08];
         return [0.16 + t * 0.08, 0.15 + t * 0.07, 0.15 + t * 0.07];
     }
-    // Land: ramp from dark grey to pale grey, slight warm dust tint in lowlands
     const hKm = elevToHeightKm(elevation);
-    const base = 0.24 + Math.min(0.58, hKm / 6 * 0.58);
-    const warmth = Math.max(0, 0.025 - hKm * 0.006); // warm dust tint near ground
+    if (isHot) {
+        // Mercury-like: warm tan lowlands (baked regolith), bright pale-grey peaks
+        const base   = 0.30 + Math.min(0.60, hKm / 6 * 0.60);
+        const warmth = Math.max(0, 0.06 - hKm * 0.012);
+        return [base + warmth * 1.2, base + warmth * 0.5, base - warmth * 0.3];
+    }
+    if (isCold) {
+        // Cold barren: grey-blue rock, subtle cold tint strengthens at altitude
+        const base = 0.20 + Math.min(0.58, hKm / 6 * 0.58);
+        const cold  = Math.min(0.04, hKm * 0.006);
+        return [base - cold, base - cold * 0.3, base + cold * 2];
+    }
+    // Default neutral grey with subtle warm dust near ground
+    const base   = 0.24 + Math.min(0.58, hKm / 6 * 0.58);
+    const warmth = Math.max(0, 0.025 - hKm * 0.006);
     return [base + warmth, base - warmth * 0.3, base - warmth * 0.5];
 }
 
-/** Arid world (no hydrosphere): ochre/rust/sandstone — Mars-like dry surface. */
+/**
+ * Arid world (no hydrosphere): ochre/rust/sandstone dry surface.
+ * Very hot (>80°C): scorched yellow-brown, bleached pale peaks.
+ * Very cold (<-110°C): faded pinkish-grey rust — still red-dominant, just desaturated.
+ * Default: standard Mars-like orange-ochre → pale rocky grey (fires for Mars at -60°C).
+ */
 function aridColor(koppenId, elevation) {
+    const isHot  = _baseTemp > 80;
+    const isCold = _baseTemp < -110;   // only truly frigid worlds (not Mars at -60°C)
+
     if (elevation <= 0) {
-        // Dried seabed: rust-brown, slightly distinguishable by depth
+        if (isHot) {
+            if (elevation < -0.40) return [0.28, 0.18, 0.08];
+            const t = (elevation + 0.40) / 0.40;
+            return [0.28 + t * 0.28, 0.18 + t * 0.20, 0.08 + t * 0.14];
+        }
+        if (isCold) {
+            if (elevation < -0.40) return [0.24, 0.16, 0.12];
+            const t = (elevation + 0.40) / 0.40;
+            return [0.24 + t * 0.22, 0.16 + t * 0.16, 0.12 + t * 0.10];
+        }
+        // Standard Mars-like rust seabed
         if (elevation < -0.40) return [0.30, 0.18, 0.10];
         const t = (elevation + 0.40) / 0.40;
         return [0.30 + t * 0.24, 0.18 + t * 0.18, 0.10 + t * 0.14];
     }
     const hKm = elevToHeightKm(elevation);
     const t = Math.min(1, hKm / 5);
-    // Orange-ochre at low elevations, fading to pale rocky grey at peaks
+    if (isHot) {
+        // Scorched: vivid yellow-brown lowlands, bleached pale at peaks
+        const r = 0.82 - t * 0.12;
+        const g = 0.60 - t * 0.15;
+        const b = 0.20 + t * 0.22;
+        return [r, g, b];
+    }
+    if (isCold) {
+        // Frigid rust: faded pinkish-grey — red always leads, just desaturated vs standard
+        const r = 0.68 - t * 0.16;
+        const g = 0.44 - t * 0.14;
+        const b = 0.28 + t * 0.06;   // stays low so red always dominates
+        const warmBias = koppenId <= 7 ? 0.04 : (koppenId >= 29 ? -0.04 : 0.00);
+        return [
+            Math.min(1, r + warmBias),
+            Math.min(1, g + warmBias * 0.4),
+            Math.max(0, b - warmBias * 0.2),
+        ];
+    }
+    // Standard Mars-like: orange-ochre at low elevations, pale rocky grey at peaks
     const r = 0.74 - t * 0.18;
     const g = 0.50 - t * 0.18;
     const b = 0.22 + t * 0.14;
-    // Subtle biome variation: tropical zones slightly more orange, polar zones grayer
     const warmBias = koppenId <= 7 ? 0.05 : (koppenId >= 29 ? -0.06 : 0.00);
     return [
         Math.min(1, r + warmBias),
@@ -172,24 +249,65 @@ function aridColor(koppenId, elevation) {
     ];
 }
 
-/** Ice world (extreme cold): pale blue-white frozen surface. */
+/**
+ * Ice world (extreme cold): frozen surface.
+ * High hydro (≥3): Europa/Snowball — brilliant white with teal fracture hints,
+ *   deep blue-grey frozen ocean.
+ * Low hydro (≤1): Frost world — underlying rock visible, frost coats at altitude.
+ * Default: standard pale blue-white with biome tint blended at low elevations.
+ */
 function iceColor(koppenId, elevation) {
+    const isHighHydro = _hydrosphere >= 3;
+    const isLowHydro  = _hydrosphere <= 1;
+
     if (elevation <= 0) {
-        // Frozen ocean: dark blue-grey deep, pale blue-grey shallow
+        if (isHighHydro) {
+            // Europa-like: thick frozen ocean — midnight blue deep, teal-blue shallow
+            if (elevation < -0.40) return [0.18, 0.26, 0.42];
+            const t = (elevation + 0.40) / 0.40;
+            return [0.18 + t * 0.44, 0.26 + t * 0.42, 0.42 + t * 0.38];
+        }
+        if (isLowHydro) {
+            // Frost world: shallow frozen patches over dark rock
+            if (elevation < -0.40) return [0.18, 0.16, 0.18];
+            const t = (elevation + 0.40) / 0.40;
+            return [0.18 + t * 0.30, 0.16 + t * 0.28, 0.18 + t * 0.30];
+        }
+        // Standard ice world ocean
         if (elevation < -0.40) return [0.28, 0.36, 0.52];
         const t = (elevation + 0.40) / 0.40;
         return [0.28 + t * 0.36, 0.36 + t * 0.30, 0.52 + t * 0.24];
     }
     const hKm = elevToHeightKm(elevation);
-    const t = Math.min(1, hKm / 5);
-    // Land: pale icy blue-white; brighter at altitude
+    const t   = Math.min(1, hKm / 5);
+    if (isHighHydro) {
+        // Europa-like land: brilliant white with subtle teal fracture tint at low altitude
+        const r = 0.70 + t * 0.26;
+        const g = 0.76 + t * 0.20;
+        const b = 0.88 + t * 0.08;
+        const fracture = Math.max(0, 0.10 - hKm * 0.03);
+        return [Math.min(1, r - fracture * 0.35), Math.min(1, g), Math.min(1, b)];
+    }
+    if (isLowHydro) {
+        // Frost world: biome rock with white frost blending in above mid-elevation
+        const frost = Math.min(1, 0.25 + t * 0.60);
+        if (koppenId >= 1 && koppenId <= 30) {
+            const earth = BIOME_COLORS[koppenId];
+            return [
+                earth[0] * (1 - frost) + 0.88 * frost,
+                earth[1] * (1 - frost) + 0.90 * frost,
+                earth[2] * (1 - frost) + 0.94 * frost,
+            ];
+        }
+        return [0.55 + t * 0.38, 0.57 + t * 0.36, 0.60 + t * 0.34];
+    }
+    // Standard ice world land
     const r = 0.68 + t * 0.22;
     const g = 0.74 + t * 0.18;
     const b = 0.82 + t * 0.12;
-    // Blend in a sliver of original biome tint at low elevations for variety
     if (koppenId >= 1 && koppenId <= 30) {
         const earth = BIOME_COLORS[koppenId];
-        const frost = 0.75 + t * 0.15; // 75-90% frosted
+        const frost = 0.75 + t * 0.15;
         return [
             r * frost + earth[0] * (1 - frost),
             g * frost + earth[1] * (1 - frost),
@@ -199,16 +317,63 @@ function iceColor(koppenId, elevation) {
     return [r, g, b];
 }
 
-/** Alien world (Titan/Venus-like): amber-orange methane seas, rust highlands. */
+/**
+ * Alien world: temperature-dependent sub-palettes.
+ *
+ * Venus-type (baseTemp > 200°C): sulfurous cream-yellow hellscape —
+ *   dark molten-brown basins, pale ochre-cream land fading to bright yellow-white peaks.
+ *
+ * Titan-type (baseTemp < -80°C): murky methane seas, dark amber-rust terrain —
+ *   near-black sea deeps, dark amber shores, deep brick-red mid-land, dusty tan peaks.
+ *
+ * Generic alien (mid-temperature): original palette — deep indigo-to-amber exotic seas,
+ *   amber-orange lowlands fading to ochre peaks.
+ */
 function alienColor(koppenId, elevation) {
+    const isVenus = _baseTemp > 200;
+    const isTitan = _baseTemp < -80;
+
+    if (isVenus) {
+        // Venus-type: sulfurous hellscape — no liquid, no blue at all
+        if (elevation <= 0) {
+            if (elevation < -0.40) return [0.22, 0.14, 0.06];
+            const t = (elevation + 0.40) / 0.40;
+            return [0.22 + t * 0.28, 0.14 + t * 0.20, 0.06 + t * 0.12];
+        }
+        const hKm = elevToHeightKm(elevation);
+        const t   = Math.min(1, hKm / 5);
+        // Lowlands: pale ochre-cream; peaks: bright sulfurous yellow-white
+        const r = 0.78 + t * 0.16;
+        const g = 0.62 + t * 0.24;
+        const b = 0.24 + t * 0.28;
+        return [Math.min(1, r), Math.min(1, g), Math.min(1, b)];
+    }
+
+    if (isTitan) {
+        // Titan-type: murky methane seas, amber-rust highlands
+        if (elevation <= 0) {
+            // Methane seas: near-black in deeps, dark amber-brown at shore
+            if (elevation < -0.40) return [0.08, 0.05, 0.04];
+            const t = (elevation + 0.40) / 0.40;
+            return [0.08 + t * 0.18, 0.05 + t * 0.14, 0.04 + t * 0.08];
+        }
+        const hKm = elevToHeightKm(elevation);
+        const t   = Math.min(1, hKm / 5);
+        // Dark amber lowlands → deep brick-red mid → pale dusty tan peaks
+        const r = 0.55 + t * 0.22;
+        const g = 0.28 - t * 0.06;
+        const b = 0.05 + t * 0.14;
+        return [Math.min(1, r), Math.max(0, g), Math.min(1, b)];
+    }
+
+    // Generic alien (mid-temperature): indigo-to-amber exotic seas, ochre-rust land
     if (elevation <= 0) {
-        // Exotic seas (methane/sulfuric): deep indigo to murky amber-brown
         if (elevation < -0.40) return [0.10, 0.07, 0.20];
         const t = (elevation + 0.40) / 0.40;
         return [0.10 + t * 0.34, 0.07 + t * 0.22, 0.20 + t * 0.12];
     }
     const hKm = elevToHeightKm(elevation);
-    const t = Math.min(1, hKm / 5);
+    const t   = Math.min(1, hKm / 5);
     // Ground: amber-orange lowlands → rust-red mid → pale ochre peaks
     const r = 0.62 + t * 0.18;
     const g = 0.30 - t * 0.05;

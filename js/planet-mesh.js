@@ -20,12 +20,23 @@ const MAP_CLIP_PLANES = [
 let _biomeCache = null;
 let _biomeCacheKey = null;
 let _biomeModeCacheKey = null;
+let _biomePaletteCacheKey = null;
+
+// Build a compact key string from the palette sub-variant params that affect which color
+// branch fires inside iceColor / alienColor / aridColor / barrenColor.
+function _makePaletteKey(params) {
+    if (!params) return '0:0:0';
+    return `${params.baseTemp ?? 15}:${params.atmosphere ?? 3}:${params.hydrosphere ?? 3}`;
+}
 
 function getCachedBiomeSmoothed(mesh, koppenArr, r_elevation, biomeMode = 'earth') {
-    if (_biomeCache && _biomeCacheKey === koppenArr && _biomeModeCacheKey === biomeMode) return _biomeCache;
+    const paletteKey = _makePaletteKey(state.planetaryParams);
+    if (_biomeCache && _biomeCacheKey === koppenArr && _biomeModeCacheKey === biomeMode
+            && _biomePaletteCacheKey === paletteKey) return _biomeCache;
     _biomeCache = smoothBiomeColors(mesh, koppenArr, r_elevation, biomeMode);
     _biomeCacheKey = koppenArr;
     _biomeModeCacheKey = biomeMode;
+    _biomePaletteCacheKey = paletteKey;
     return _biomeCache;
 }
 

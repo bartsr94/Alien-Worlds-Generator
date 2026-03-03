@@ -64,7 +64,7 @@ After any code change that adds a planetary parameter that affects rendering, fo
 4. In `js/main.js`, import `setMyParam` and call it in the `generate-done` handler after `state.planetaryParams` is populated
 5. Ensure Earth defaults (`upliftMult=1`, `hasLiquidOcean=true`, etc.) preserve the original Earth output exactly
 
-Existing examples: `_upliftMult`/`setUpliftMult` (mountain height scaling) and `_hasLiquidOcean`/`setHasLiquidOcean` (dry-world terrain colors).
+Existing examples: `_upliftMult`/`setUpliftMult` (mountain height scaling), `_hasLiquidOcean`/`setHasLiquidOcean` (dry-world terrain colors), and `_baseTemp`/`setBaseTemp`, `_atmosphere`/`setAtmosphere`, `_hydrosphere`/`setHydrosphere` (alien/arid/ice/barren palette sub-variant selection).
 
 After any code change that adds a new full-disc globe visual effect (something visible across the whole planet face, not just the rim), follow the **`scene.js` globe layer pattern**:
 

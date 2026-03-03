@@ -236,7 +236,7 @@ js/
   planetary-params.js   Planetary Physics parameter builder — derives all simulation constants from the five physics sliders
   rng.js                Seeded PRNG (Park-Miller LCG)
   simplex-noise.js      3D Simplex noise with fBm and ridged fBm
-  color-map.js          Elevation → RGB colour mapping + satellite biome colors
+  color-map.js          Elevation → RGB colour mapping + satellite biome palettes (earth / arid / ice / alien / barren), each with temperature- and hydrosphere-driven sub-variants
   sphere-mesh.js        Fibonacci sphere, Delaunay, SphereMesh dual-mesh
   plates.js             Tectonic plate generation (farthest-point seeding, round-robin flood fill, compactness constraints)
   coarse-plates.js      Resolution-independent plate pipeline — coarse reference grid, projection, boundary smoothing

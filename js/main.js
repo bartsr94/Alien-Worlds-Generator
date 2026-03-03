@@ -12,7 +12,8 @@ import { buildMesh, updateMeshColors, buildMapMesh, rebuildGrids, exportMap, exp
 import { setupEditMode } from './edit-mode.js';
 import { detailFromSlider, sliderFromDetail } from './detail-scale.js';
 import { KOPPEN_CLASSES } from './koppen.js';
-import { elevationToColor, setUpliftMult, setHasLiquidOcean } from './color-map.js';
+import { elevationToColor, setUpliftMult, setHasLiquidOcean,
+         setBaseTemp, setAtmosphere, setHydrosphere } from './color-map.js';
 import { buildPlanetaryParams, ATM_LABELS, HYDRO_LABELS } from './planetary-params.js';
 
 // World Preset definitions — { gravity, atm, hydro, baseTemp, tilt }
@@ -644,16 +645,23 @@ genBtn.addEventListener('generate-done', () => {
     setUpliftMult(state.planetaryParams.upliftMultiplier);
     // Update terrain color ramp — dry worlds get basin grey instead of ocean blue
     setHasLiquidOcean(state.planetaryParams.hasLiquidOcean);
+    // Update palette sub-variant selectors (temperature, atmosphere, hydrosphere)
+    setBaseTemp(state.planetaryParams.baseTemp);
+    setAtmosphere(state.planetaryParams.atmosphere);
+    setHydrosphere(state.planetaryParams.hydrosphere);
     // If climate not computed and current view is a climate layer, switch to Terrain
     if (!state.climateComputed && CLIMATE_LAYERS.has(state.debugLayer)) {
         state.debugLayer = '';
         if (debugLayerEl) debugLayerEl.value = '';
         syncTabsToLayer('');
-        updateMeshColors();
     }
     syncTabsToLayer(state.debugLayer);
     if (debugLayerEl) debugLayerEl.value = state.debugLayer;
     updateLegend(state.debugLayer);
+
+    // Always re-render with the newly applied palette vars (setBaseTemp etc. changed
+    // module state in color-map.js after buildMesh already ran with stale values).
+    updateMeshColors();
 
     // Rebuild wind/ocean arrows if a relevant debug layer is active
     const v = state.debugLayer;
