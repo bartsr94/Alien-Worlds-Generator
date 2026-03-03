@@ -182,6 +182,7 @@ for (const [s,v] of [['sN','vN'],['sP','vP'],['sCn','vCn'],['sJ','vJ'],['sNs','v
         if (s === 'sGravity' || s === 'sAtm' || s === 'sHydro' || s === 'sBaseTemp' || s === 'sTilt') {
             const wp = document.getElementById('worldPreset');
             if (wp) wp.value = 'custom';
+            state.currentPreset = 'custom';
             updatePlanetWarnings();
         }
     });
@@ -231,6 +232,7 @@ function applyPreset(name) {
     // input events above reset the dropdown to 'custom'; restore the preset label (random stays 'custom')
     const wp = document.getElementById('worldPreset');
     if (wp && name !== 'random') wp.value = name;
+    state.currentPreset = (name !== 'random') ? name : 'custom';
 }
 
 /** Show constraint warnings for implausible planetary parameter combinations. */
@@ -635,6 +637,7 @@ genBtn.addEventListener('generate-done', () => {
         hydrosphere: +(document.getElementById('sHydro')?.value    ?? 3),
         baseTemp:    +(document.getElementById('sBaseTemp')?.value  ?? 15),
         axialTilt:   +(document.getElementById('sTilt')?.value     ?? 23),
+        preset:      document.getElementById('worldPreset')?.value ?? 'custom',
     });
     // Update atmosphere rim glow and water sphere appearance
     updateAtmosphereColor(state.planetaryParams.atmosphereRimColor);

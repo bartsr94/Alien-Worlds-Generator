@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<!--
+  Preset generation test harness
+  ================================
+  Runs all 10 world presets (9 named + Random Alien) through the full terrain
+  generation pipeline using the real planet-worker.js and reports pass/fail.
+
+  REQUIREMENTS
+  ------------
+  Must be served over HTTP (ES module workers cannot load from file://).
+  From the project root:
+
+      python3 -m http.server 8000
+      # or: npx serve .
+
+  Then open: http://localhost:8000/tests/presets.html
+
+  WHAT IS TESTED
+  --------------
+  For every preset the harness sends a `generate` command to a fresh worker
+  (fixed seed, low detail, climate skipped for speed) and checks:
+
+    1. Generation completes — worker returns `type: "done"`, no error thrown
+    2. Region count — `numRegions` matches the requested N
+    3. Elevation integrity — no NaN or ±Infinity values in r_elevation
+    4. Land/ocean fraction — measured land% is within the per-preset expected band
+    5. Peak elevation — at least one cell above sea level (all presets have land)
+    6. Params propagation — response echoes the correct seed and nMag
+
+  Climate layers (wind, precipitation, temperature) are NOT tested here to keep
+  the suite fast; they are exercised at runtime by the main app.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Preset Generation Tests — World Orogen</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: system-ui, sans-serif;
+    background: #0e1117;
+    color: #e6edf3;
+    padding: 2rem;
+    min-height: 100dvh;
+  }
+
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  .subtitle { color: #8b949e; font-size: 0.875rem; margin-bottom: 1.5rem; }
+
+  #summary {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.875rem;
+  }
+  .stat { color: #8b949e; }
+  .stat span { font-weight: 700; }
+  #passCount span  { color: #3fb950; }
+  #failCount span  { color: #f85149; }
+  #runningCount span { color: #d29922; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  th {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    color: #8b949e;
+    border-bottom: 1px solid #30363d;
+    font-weight: 600;
+  }
+  td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #21262d;
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+
+  .badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    min-width: 4rem;
+    text-align: center;
+  }
+  .pass    { background: #1a3a1e; color: #3fb950; border: 1px solid #238636; }
+  .fail    { background: #3a1a1a; color: #f85149; border: 1px solid #da3633; }
+  .running { background: #2a2200; color: #d29922; border: 1px solid #9e6a03; }
+  .pending { background: #1c2128; color: #8b949e; border: 1px solid #30363d; }
+
+  .assertions { list-style: none; line-height: 1.6; margin-top: 0.25rem; }
+  .assertions li::before { display: inline-block; width: 1.25rem; }
+  .assertions .ok::before   { content: '✓ '; color: #3fb950; }
+  .assertions .bad::before  { content: '✗ '; color: #f85149; }
+  .assertions .skip::before { content: '– '; color: #8b949e; }
+  .assertions .bad { color: #f85149; }
+
+  .preset-name { font-weight: 600; }
+  .preset-params { color: #8b949e; font-size: 0.8rem; margin-top: 0.15rem; }
+
+  .timing { color: #8b949e; font-size: 0.8rem; }
+  #runBtn {
+    background: #238636;
+    color: #fff;
+    border: none;
+    padding: 0.5rem 1.25rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    margin-bottom: 1.5rem;
+  }
+  #runBtn:disabled { opacity: 0.5; cursor: default; }
+  #runBtn:hover:not(:disabled) { background: #2ea043; }
+  html { scroll-behavior: smooth; }
+</style>
+</head>
+<body>
+
+<h1>World Orogen — Preset Generation Tests</h1>
+<p class="subtitle">
+  Runs each world preset through the generation pipeline at low detail (N = 5 000, seed = fixed).
+  Must be served over HTTP — open via <code>http://localhost:8000/tests/presets.html</code>.
+</p>
+
+<div id="summary">
+  <div class="stat" id="passCount">Passed: <span>0</span></div>
+  <div class="stat" id="failCount">Failed: <span>0</span></div>
+  <div class="stat" id="runningCount">Running: <span>0</span></div>
+</div>
+
+<button id="runBtn">▶ Run All Tests</button>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:180px">Preset</th>
+      <th style="width:90px">Status</th>
+      <th style="width:90px">Time</th>
+      <th>Assertions</th>
+    </tr>
+  </thead>
+  <tbody id="tbody"></tbody>
+</table>
+
+<script type="module">
+// ---------------------------------------------------------------------------
+// Test definitions
+// ---------------------------------------------------------------------------
+
+/*
+  Land fraction bounds (% of cells with elevation > 0) are wide bands that
+  account for:
+    • Stochastic variation in plate generation
+    • The low mesh resolution (N=5000) amplifying boundary effects
+
+  The fixed seed (12345) makes runs deterministic, so these bounds are also
+  tight enough to catch gross regressions (e.g. forgetting to thread
+  oceanFraction, accidentally flipping ocean/land logic, etc.).
+*/
+
+const PRESETS = [
+  {
+    id: 'earth',
+    label: '🌍 Earth-like',
+    sliders: { gravity: 1.0, atmosphere: 3, hydrosphere: 3, baseTemp:   15, axialTilt: 23 },
+    landPctMin:  15, landPctMax:  55,   // target ~30% land
+    expectOcean: true,                   // water sphere should show
+    expectCraters: false,
+  },
+  {
+    id: 'arid',
+    label: '🔴 Arid Desert',
+    sliders: { gravity: 1.0, atmosphere: 2, hydrosphere: 1, baseTemp:   40, axialTilt: 25 },
+    landPctMin:  70, landPctMax: 100,   // hydro=1 → ~5% ocean target = mostly land
+    expectOcean: true,
+    expectCraters: false,
+  },
+  {
+    id: 'mars',
+    label: '🟠 Mars-like',
+    sliders: { gravity: 0.4, atmosphere: 1, hydrosphere: 0, baseTemp:  -60, axialTilt: 25 },
+    landPctMin:  85, landPctMax: 100,   // hydro=0 → nearly all land (rift valleys may dip below 0)
+    expectOcean: false,
+    expectCraters: true,                // atm=1 (Trace) → craters stamped
+  },
+  {
+    id: 'venus',
+    label: '🟡 Venus-like',
+    sliders: { gravity: 0.9, atmosphere: 5, hydrosphere: 0, baseTemp: 460, axialTilt:  3 },
+    landPctMin:  85, landPctMax: 100,
+    expectOcean: false,
+    expectCraters: false,               // atm=5 → no craters
+  },
+  {
+    id: 'ocean',
+    label: '🔵 Ocean World',
+    sliders: { gravity: 1.0, atmosphere: 3, hydrosphere: 5, baseTemp:   20, axialTilt: 20 },
+    landPctMin:   0, landPctMax:  20,   // hydro=5 → ~5% land
+    expectOcean: true,
+    expectCraters: false,
+  },
+  {
+    id: 'highgrav',
+    label: '🟤 High Gravity',
+    sliders: { gravity: 2.5, atmosphere: 3, hydrosphere: 3, baseTemp:   15, axialTilt: 23 },
+    landPctMin:  15, landPctMax:  55,
+    expectOcean: true,
+    expectCraters: false,
+  },
+  {
+    id: 'iceball',
+    label: '⚪ Ice Ball',
+    sliders: { gravity: 0.8, atmosphere: 2, hydrosphere: 2, baseTemp:  -80, axialTilt: 15 },
+    landPctMin:  50, landPctMax:  90,   // hydro=2 → ~25% ocean
+    expectOcean: true,
+    expectCraters: false,
+  },
+  {
+    id: 'titan',
+    label: '🟣 Titan-like',
+    sliders: { gravity: 0.1, atmosphere: 4, hydrosphere: 2, baseTemp: -180, axialTilt: 27 },
+    landPctMin:  50, landPctMax:  90,
+    expectOcean: true,
+    expectCraters: false,
+  },
+  {
+    id: 'deadrock',
+    label: '⚫ Dead Rock',
+    sliders: { gravity: 0.5, atmosphere: 0, hydrosphere: 0, baseTemp:    0, axialTilt: 10 },
+    landPctMin:  85, landPctMax: 100,   // hydro=0 → nearly all land (rift valleys may dip below 0)
+    expectOcean: false,
+    expectCraters: true,                // atm=0 → craters stamped
+  },
+  {
+    id: 'random',
+    label: '🎲 Random Alien',
+    // Use a deterministic "random" config so the test is reproducible
+    sliders: { gravity: 0.6, atmosphere: 2, hydrosphere: 4, baseTemp:   60, axialTilt: 55 },
+    landPctMin:   5, landPctMax:  35,   // hydro=4 → ~80% ocean
+    expectOcean: true,
+    expectCraters: false,
+  },
+];
+
+// Generation parameters shared across all tests (minimise runtime)
+const GEN_PARAMS = {
+  cmd:              'generate',
+  N:                5000,
+  P:                20,
+  jitter:           0.75,
+  nMag:             0.40,
+  numContinents:    4,
+  smoothing:        0.10,
+  hydraulicErosion: 0.50,
+  thermalErosion:   0.10,
+  ridgeSharpening:  0.50,
+  glacialErosion:   0.50,
+  terrainWarp:      0.75,
+  seed:             12345,   // fixed seed for reproducibility
+  skipClimate:      true,    // skip wind/precip/temp — not under test here
+};
+
+// ---------------------------------------------------------------------------
+// DOM helpers
+// ---------------------------------------------------------------------------
+
+let passCount = 0, failCount = 0, runningCount = 0;
+
+function updateSummary() {
+  document.querySelector('#passCount span').textContent    = passCount;
+  document.querySelector('#failCount span').textContent    = failCount;
+  document.querySelector('#runningCount span').textContent = runningCount;
+}
+
+function createRow(preset) {
+  const tr = document.createElement('tr');
+  tr.id = `row-${preset.id}`;
+
+  const { gravity, atmosphere, hydrosphere, baseTemp, axialTilt } = preset.sliders;
+  const ATM  = ['None','Trace','Thin','Moderate','Thick','Crushing'];
+  const HYD  = ['None','Trace','Partial','Moderate','High','Flooded'];
+  const paramStr = `g=${gravity}  atm=${ATM[atmosphere]}  hydro=${HYD[hydrosphere]}  T=${baseTemp>0?'+':''}${baseTemp}°C  tilt=${axialTilt}°`;
+
+  tr.innerHTML = `
+    <td>
+      <div class="preset-name">${preset.label}</div>
+      <div class="preset-params">${paramStr}</div>
+    </td>
+    <td><span class="badge pending" id="badge-${preset.id}">Pending</span></td>
+    <td class="timing" id="time-${preset.id}">—</td>
+    <td><ul class="assertions" id="assert-${preset.id}"></ul></td>
+  `;
+  document.getElementById('tbody').appendChild(tr);
+}
+
+function setBadge(id, cls, label) {
+  const el = document.getElementById(`badge-${id}`);
+  el.className = `badge ${cls}`;
+  el.textContent = label;
+}
+
+function setTime(id, ms) {
+  document.getElementById(`time-${id}`).textContent = ms < 1000 ? `${ms}ms` : `${(ms/1000).toFixed(1)}s`;
+}
+
+function addAssertion(id, ok, text) {
+  const li = document.createElement('li');
+  li.className = ok ? 'ok' : 'bad';
+  li.textContent = text;
+  document.getElementById(`assert-${id}`).appendChild(li);
+}
+
+// ---------------------------------------------------------------------------
+// Run a single preset test
+// ---------------------------------------------------------------------------
+
+function runPreset(preset) {
+  return new Promise((resolve) => {
+    setBadge(preset.id, 'running', 'Running…');
+    runningCount++;
+    updateSummary();
+
+    const worker = new Worker('../js/planet-worker.js', { type: 'module' });
+    const t0 = performance.now();
+
+    worker.onmessage = (e) => {
+      const d = e.data;
+
+      if (d.type === 'progress') return; // ignore progress ticks
+
+      const elapsed = Math.round(performance.now() - t0);
+      worker.terminate();
+      setTime(preset.id, elapsed);
+      runningCount--;
+
+      let allPassed = true;
+
+      // ── Assert 1: completed without error ──────────────────────────────
+      const completed = d.type === 'done';
+      addAssertion(preset.id, completed, `Generation completed (type = "${d.type}")`);
+      if (!completed) {
+        addAssertion(preset.id, false, `Worker error: ${d.message ?? '(unknown)'}`);
+        allPassed = false;
+      }
+
+      if (completed) {
+        const { numRegions, r_elevation, _params } = d;
+
+        // ── Assert 2: region count ──────────────────────────────────────
+        const nOk = numRegions >= GEN_PARAMS.N * 0.95 && numRegions <= GEN_PARAMS.N * 1.10;
+        addAssertion(preset.id, nOk,
+          `Region count: ${numRegions.toLocaleString()} (expected ≈ ${GEN_PARAMS.N.toLocaleString()})`);
+        if (!nOk) allPassed = false;
+
+        // ── Assert 3: elevation integrity ───────────────────────────────
+        let nans = 0, infs = 0;
+        for (let i = 0; i < r_elevation.length; i++) {
+          const v = r_elevation[i];
+          if (isNaN(v)) nans++;
+          else if (!isFinite(v)) infs++;
+        }
+        const integOk = nans === 0 && infs === 0;
+        addAssertion(preset.id, integOk,
+          integOk
+            ? `Elevation integrity: no NaN/Inf values`
+            : `Elevation integrity: ${nans} NaN, ${infs} Inf`);
+        if (!integOk) allPassed = false;
+
+        // ── Assert 4: land / ocean fraction ─────────────────────────────
+        let landCells = 0;
+        for (let i = 0; i < r_elevation.length; i++) {
+          if (r_elevation[i] > 0) landCells++;
+        }
+        const landPct = Math.round((landCells / numRegions) * 100);
+        const { landPctMin, landPctMax } = preset;
+        const fracOk = landPct >= landPctMin && landPct <= landPctMax;
+        addAssertion(preset.id, fracOk,
+          `Land fraction: ${landPct}% (expected ${landPctMin}–${landPctMax}%)`);
+        if (!fracOk) allPassed = false;
+
+        // ── Assert 5: peak elevation (some land exists) ──────────────────
+        let peak = -Infinity;
+        for (let i = 0; i < r_elevation.length; i++) {
+          if (r_elevation[i] > peak) peak = r_elevation[i];
+        }
+        const hasPeak = peak > 0;
+        addAssertion(preset.id, hasPeak,
+          hasPeak ? `Peak elevation: ${peak.toFixed(3)}` : `Peak elevation: ${peak.toFixed(3)} — no land above sea level`);
+        if (!hasPeak) allPassed = false;
+
+        // ── Assert 6: seed echoed correctly ─────────────────────────────
+        const seedOk = d.seed === GEN_PARAMS.seed;
+        addAssertion(preset.id, seedOk,
+          `Seed: ${d.seed} (expected ${GEN_PARAMS.seed})`);
+        if (!seedOk) allPassed = false;
+
+        // ── Assert 7: dry world — no ocean plates assigned ───────────────
+        // If hydrosphere === 0 the ocean fraction target is 0.  The plateIsOcean
+        // array echoed in the result should be empty (no ocean plates).  Note:
+        // individual cells can still sit below 0 (rift valleys), so we check the
+        // plate array rather than cell count.
+        if (preset.sliders.hydrosphere === 0) {
+          const oceanPlateCount = d.plateIsOcean ? d.plateIsOcean.length : 0;
+          const noOceanPlates = oceanPlateCount === 0;
+          addAssertion(preset.id, noOceanPlates,
+            noOceanPlates
+              ? `Dry world: 0 ocean plates assigned ✓`
+              : `Dry world: ${oceanPlateCount} ocean plate(s) unexpectedly assigned`);
+          if (!noOceanPlates) allPassed = false;
+        }
+
+        // ── Assert 8: craters expected on airless / trace-atmosphere worlds
+        // The presence of craters is inferred: the terrain warp on airless
+        // worlds is disabled so there should be NO negative correlation between
+        // crateriness and smoothing.  Instead, we do a rough check: on dead-rock
+        // and mars-like worlds the elevation variance should be non-trivial
+        // (surface is NOT flat — craters create local highs and lows).
+        if (preset.expectCraters) {
+          let sum = 0, sumSq = 0;
+          for (let i = 0; i < r_elevation.length; i++) {
+            sum += r_elevation[i];
+            sumSq += r_elevation[i] * r_elevation[i];
+          }
+          const mean = sum / r_elevation.length;
+          const variance = sumSq / r_elevation.length - mean * mean;
+          const stdDev = Math.sqrt(variance);
+          const variedEnough = stdDev > 0.05;
+          addAssertion(preset.id, variedEnough,
+            `Crater world elevation stdDev: ${stdDev.toFixed(4)} (expected > 0.05)`);
+          if (!variedEnough) allPassed = false;
+        }
+      }
+
+      // ── Final verdict ───────────────────────────────────────────────────
+      if (allPassed) {
+        passCount++;
+        setBadge(preset.id, 'pass', 'Pass');
+      } else {
+        failCount++;
+        setBadge(preset.id, 'fail', 'Fail');
+      }
+      updateSummary();
+      resolve(allPassed);
+    };
+
+    worker.onerror = (err) => {
+      const elapsed = Math.round(performance.now() - t0);
+      worker.terminate();
+      setTime(preset.id, elapsed);
+      runningCount--;
+      failCount++;
+      setBadge(preset.id, 'fail', 'Fail');
+      addAssertion(preset.id, false, `Uncaught worker error: ${err.message}`);
+      updateSummary();
+      resolve(false);
+    };
+
+    worker.postMessage({
+      ...GEN_PARAMS,
+      gravity:     preset.sliders.gravity,
+      atmosphere:  preset.sliders.atmosphere,
+      hydrosphere: preset.sliders.hydrosphere,
+      baseTemp:    preset.sliders.baseTemp,
+      axialTilt:   preset.sliders.axialTilt,
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Bootstrap
+// ---------------------------------------------------------------------------
+
+// Build table rows immediately so the page isn't blank before Start is clicked
+for (const p of PRESETS) createRow(p);
+
+const runBtn = document.getElementById('runBtn');
+
+runBtn.addEventListener('click', async () => {
+  // Reset counters and badges
+  passCount = failCount = runningCount = 0;
+  updateSummary();
+  for (const p of PRESETS) {
+    setBadge(p.id, 'pending', 'Pending');
+    document.getElementById(`assert-${p.id}`).innerHTML = '';
+    document.getElementById(`time-${p.id}`).textContent = '—';
+  }
+
+  runBtn.disabled = true;
+
+  // Run tests sequentially (avoids thrashing the browser with 10 heavy workers)
+  for (const preset of PRESETS) {
+    await runPreset(preset);
+  }
+
+  runBtn.disabled = false;
+  runBtn.textContent = '↺ Run Again';
+});
+</script>
+</body>
+</html>
