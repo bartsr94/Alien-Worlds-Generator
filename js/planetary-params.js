@@ -90,22 +90,46 @@ function atmosphereRimColor(sliders) {
 }
 
 /**
- * Biome rendering mode string consumed by color-map.js (Phase 3).
- * 'earth' = existing behaviour.
+ * Biome rendering mode string consumed by color-map.js.
+ * Derived purely from slider values — not from the preset name — so that
+ * custom slider configurations produce the correct palette even without a
+ * named preset active.
+ *
+ * Decision tree:
+ *   barren — no atmosphere (airless, cratered)
+ *   arid   — no hydrosphere (dry rust/desert world)
+ *   ice    — cold enough that all liquid water is frozen
+ *   alien  — crushing-hot (Venus) or thick-cold cryo (Titan)
+ *   earth  — everything else
  */
 function deriveBiomeMode(sliders) {
-    const { atmosphere: atm, hydrosphere: hydro, baseTemp: t, preset } = sliders;
-    if (preset === 'titan')  return 'alien';
-    if (preset === 'venus')  return 'alien';
-    if (atm  === 0)          return 'barren';
-    if (hydro === 0)         return 'arid';
-    if (t < -80)             return 'ice';
+    const { atmosphere: atm, hydrosphere: hydro, baseTemp: t } = sliders;
+    if (atm  === 0) return 'barren';
+    if (hydro === 0) return 'arid';
+    if (t < -80)    return 'ice';
+    // Crushing-hot: Venus-like — sulfuric yellow-cream, no green anywhere
+    if (atm >= 5 && t > 200) return 'alien';
+    // Thick-cold: Titan-like — methane seas, orange haze highlands
+    if (atm >= 3 && t < -120) return 'alien';
     return 'earth';
 }
 
 /** Seasonal amplitude multiplier relative to Earth (tilt=23.5° → 1.0). */
 function tiltToSeasonalAmplitude(tilt) {
     return tilt / 23.5;
+}
+
+/**
+ * Opacity of the atmospheric haze sphere rendered on the globe (0 = clear, 1 = opaque).
+ * Earth (atm=3) → 0 (no visible surface haze from orbit).
+ * Crushing (atm=5) → 0.82 (Venus: surface almost completely obscured).
+ * Cold + thick atmosphere (Titan-like) → 0.65 (deep orange haze blanket).
+ */
+function atmToHazeOpacity(atm, tempC) {
+    const base = [0, 0.04, 0.12, 0, 0.38, 0.82][atm] ?? 0;
+    // Titan-like override: very cold + thick atm = cryogenic haze layer
+    if (atm >= 3 && tempC < -120) return Math.max(base, 0.65);
+    return base;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +209,8 @@ export function buildPlanetaryParams(sliders = {}) {
         surfaceFluidColor:     hydrosphereFluidColor(sliders),
         atmosphereRimColor:    atmosphereRimColor(sliders),
         biomeMode:             deriveBiomeMode(sliders),
+        // Opacity of the inner haze sphere (0 = clear sky, 1 = fully opaque cloud deck)
+        hazeOpacity:           atmToHazeOpacity(atm, tempC),
     };
 }
 

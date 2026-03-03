@@ -118,6 +118,61 @@ export function updateWaterColor(rgb) {
     }
 }
 
+// Atmospheric haze sphere — covers the full planet disc for dense atmospheres.
+// Rendered at r=1.01 so it sits above terrain and water.  Unlike the rim-only
+// atmosMesh (r=1.12, limb-only glow), this sphere is visible across the whole
+// face of the globe and is used for Thick/Crushing/Titan-cold atmosphere types.
+const hazeMat = new THREE.ShaderMaterial({
+    uniforms: {
+        hazeColor:   { value: new THREE.Color(0.35, 0.6, 1.0) },
+        hazeOpacity: { value: 0.0 },
+    },
+    vertexShader: [
+        'varying vec3 vNormal;',
+        'varying vec3 vViewDir;',
+        'void main() {',
+        '  vNormal = normalize(normalMatrix * normal);',
+        '  vec4 mvPos = modelViewMatrix * vec4(position, 1.0);',
+        '  vViewDir = normalize(-mvPos.xyz);',
+        '  gl_Position = projectionMatrix * mvPos;',
+        '}',
+    ].join('\n'),
+    fragmentShader: [
+        'uniform vec3  hazeColor;',
+        'uniform float hazeOpacity;',
+        'varying vec3  vNormal;',
+        'varying vec3  vViewDir;',
+        'void main() {',
+        '  // Limb brightening: haze column is thicker at grazing angles,',
+        '  // giving an aerial-perspective appearance at the planet edge.',
+        '  float rim = 1.0 - max(0.0, dot(vNormal, vViewDir));',
+        '  float alpha = hazeOpacity * (1.0 + rim * rim * 0.7);',
+        '  gl_FragColor = vec4(hazeColor, min(1.0, alpha));',
+        '}',
+    ].join('\n'),
+    transparent: true,
+    side: THREE.FrontSide,
+    depthWrite: false,
+});
+export const hazeMesh = new THREE.Mesh(new THREE.SphereGeometry(1.01, 64, 64), hazeMat);
+hazeMesh.visible = false;
+scene.add(hazeMesh);
+
+/**
+ * Update the atmospheric haze layer — the full-disc opacity layer on the globe.
+ * @param {number}        opacity  0 = clear; 1 = fully opaque.  From params.hazeOpacity.
+ * @param {number[]|null} rgb      [r, g, b] in 0–1.  Typically params.atmosphereTint.
+ */
+export function updateHazeLayer(opacity, rgb) {
+    if (!opacity || opacity <= 0 || !rgb) {
+        hazeMesh.visible = false;
+        return;
+    }
+    hazeMesh.visible = true;
+    hazeMat.uniforms.hazeOpacity.value = opacity;
+    hazeMat.uniforms.hazeColor.value.setRGB(rgb[0], rgb[1], rgb[2]);
+}
+
 // Equirectangular map camera & controls
 export const mapCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
 mapCamera.position.set(0, 0, 5);

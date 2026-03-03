@@ -661,6 +661,18 @@ export function computeWind(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, noi
         }
         timing.push({ stage: `Wind: pressure→wind (${name})`, ms: performance.now() - t0 });
 
+        // Apply atmospheric wind intensity scaling.
+        // Thin/no atmospheres have weaker winds (affects moisture advection in precipitation.js).
+        // The visualization r_windSpeed stays normalized 0–1 for display; only the
+        // directional r_windE/r_windN vectors that drive advection are multiplied.
+        const windMult = params?.windIntensity ?? 1.0;
+        if (windMult !== 1.0) {
+            for (let r = 0; r < numRegions; r++) {
+                r_windE[r] *= windMult;
+                r_windN[r] *= windMult;
+            }
+        }
+
         // Store pressure as deviation from 1013 for visualization (blue=low, red=high)
         const r_pressureDev = new Float32Array(numRegions);
         for (let r = 0; r < numRegions; r++) {

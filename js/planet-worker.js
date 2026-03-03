@@ -8,6 +8,7 @@ import { generateCoarsePlates, projectCoarsePlates } from './coarse-plates.js';
 import { smoothAndReconnectPlates } from './plates.js';
 import { assignElevation } from './elevation.js';
 import { warpTerrain, smoothElevation, erodeComposite, sharpenRidges, applySoilCreep } from './terrain-post.js';
+import { stampCraters } from './impact-craters.js';
 import { computeWind } from './wind.js';
 import { computeOceanCurrents } from './ocean.js';
 import { computePrecipitation } from './precipitation.js';
@@ -85,7 +86,12 @@ function runPostProcessing(mesh, r_xyz, r_elevation, params, neighborDist, seed,
         timing.push({ stage: `Erosion composite (h=${hIters}, t=${tIters}, g=${gIters})`, ms: performance.now() - t0 });
     }
 
-    if (ridgeSharpening > 0) {
+    // Ridge sharpening: skip on airless worlds — ancient tectonic terrain is
+    // rounded, not spiky; craters provide the sharp features instead.
+    // On trace-atmosphere worlds (atm=1), allow reduced sharpening.
+    const atmLevel = planetaryParams?.atmosphere ?? 3;
+    const rsAllowed = atmLevel >= 2;
+    if (ridgeSharpening > 0 && rsAllowed) {
         const rsIters = Math.round(1 + ridgeSharpening * 3);
         const rsStr = ridgeSharpening * 0.08;
         const t0 = performance.now();
@@ -97,6 +103,14 @@ function runPostProcessing(mesh, r_xyz, r_elevation, params, neighborDist, seed,
         const t0 = performance.now();
         applySoilCreep(mesh, r_elevation, r_isOcean, 3, 0.1125);
         timing.push({ stage: 'Soil creep (3 iters)', ms: performance.now() - t0 });
+    }
+
+    // Impact craters: stamp on airless (atm=0) and trace-atmosphere (atm=1) worlds.
+    // Applied last so fresh craters sit on top of all other terrain processing.
+    if (atmLevel <= 1) {
+        const t0 = performance.now();
+        stampCraters(mesh, r_xyz, r_elevation, seed, planetaryParams);
+        timing.push({ stage: `Impact craters (atm=${atmLevel})`, ms: performance.now() - t0 });
     }
 
     const dl_erosionDelta = new Float32Array(mesh.numRegions);

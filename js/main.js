@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { renderer, scene, camera, ctrl, waterMesh, atmosMesh, starsMesh,
          mapCamera, updateMapCameraFrustum, mapCtrl, canvas,
          tickZoom, tickMapZoom,
-         updateAtmosphereColor, updateWaterColor } from './scene.js';
+         updateAtmosphereColor, updateWaterColor, updateHazeLayer } from './scene.js';
 import { state } from './state.js';
 import { generate, reapplyViaWorker, computeClimateViaWorker } from './generate.js';
 import { encodePlanetCode, decodePlanetCode } from './planet-code.js';
@@ -638,6 +638,8 @@ genBtn.addEventListener('generate-done', () => {
     // Update atmosphere rim glow and water sphere appearance
     updateAtmosphereColor(state.planetaryParams.atmosphereRimColor);
     updateWaterColor(state.planetaryParams.surfaceFluidColor);
+    // Update atmospheric haze sphere — full-disc opacity layer for thick/crushing atmospheres
+    updateHazeLayer(state.planetaryParams.hazeOpacity, state.planetaryParams.atmosphereTint);
     // Update elevToHeightKm scale so mountain heights display correctly for this gravity
     setUpliftMult(state.planetaryParams.upliftMultiplier);
     // Update terrain color ramp — dry worlds get basin grey instead of ocean blue

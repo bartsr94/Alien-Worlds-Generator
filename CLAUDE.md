@@ -66,6 +66,16 @@ After any code change that adds a planetary parameter that affects rendering, fo
 
 Existing examples: `_upliftMult`/`setUpliftMult` (mountain height scaling) and `_hasLiquidOcean`/`setHasLiquidOcean` (dry-world terrain colors).
 
+After any code change that adds a new full-disc globe visual effect (something visible across the whole planet face, not just the rim), follow the **`scene.js` globe layer pattern**:
+
+1. Create a new `THREE.Mesh` with a `THREE.SphereGeometry` at radius slightly above the terrain sphere (the water sphere is at r=1.0, the haze is at r=1.01, the atmosphere rim is at r=1.12 — pick the appropriate layer)
+2. Use a `THREE.ShaderMaterial` so opacity, color, and any Fresnel/limb effects can be driven by uniforms
+3. Export both the mesh constant and an `export function updateMyLayer(...)` updater that sets `mesh.visible` and updates uniforms
+4. In `js/main.js`, import the updater and call it in the `generate-done` handler using the appropriate field from `state.planetaryParams`
+5. Add the corresponding derived value to `js/planetary-params.js` using the established helper pattern
+
+Existing example: `hazeMesh`/`updateHazeLayer` (full-disc atmospheric haze opacity, r=1.01 sphere, driven by `params.hazeOpacity` + `params.atmosphereTint`).
+
 After any code change that adds, removes, or modifies slider controls, update the planet code encoding in `js/planet-code.js` to match. The planet code packs the seed and all slider values into a compact base36 string using mixed-radix integer packing. If a slider's range, step, or count changes, or if a new slider is added, update:
 
 - The `SLIDERS` array (min, step, count for each slider)
