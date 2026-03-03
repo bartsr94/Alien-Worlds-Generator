@@ -171,7 +171,7 @@ function buildGeoIndex(r_lat, r_lon, r_sinLat, r_cosLat, r_elevation, r_isLand, 
  * @param {number} tiltRad - axial tilt in radians
  * @returns {{ spline, lons: Float64Array, lats: Float64Array }}
  */
-function computeITCZ(geoSample, season, tiltRad) {
+function computeITCZ(geoSample, season, tiltRad, seasonalAmplitude = 1.0) {
     const NUM_LON = 72;
     const sampleRadius = 20 * DEG; // wide radius for smooth geographic sampling
 
@@ -202,7 +202,10 @@ function computeITCZ(geoSample, season, tiltRad) {
         // Need ~50% land coverage for full poleward pull.
         const landPull = Math.min(1, avgLand * 2);
         const itczDeg = 5 + landPull * 15 - elevToHeightKm(avgElev) * 1.5;
-        const clampedDeg = Math.max(5, Math.min(20, itczDeg));
+        // Scale migration range by axial tilt amplitude.
+        // At tilt=23.5° (Earth), seasonalAmplitude=1.0 → same as current behaviour.
+        // At tilt=0° → ITCZ stays at equator. At high tilt → wider migration.
+        const clampedDeg = Math.max(5, Math.min(20, itczDeg)) * seasonalAmplitude;
 
         rawLats[i] = clampedDeg * sign * DEG;
     }
@@ -220,9 +223,9 @@ function computeITCZ(geoSample, season, tiltRad) {
         lats.set(tmp);
     }
 
-    // Re-clamp after smoothing: 5°–20° in the summer hemisphere
-    const clampMin = (sign > 0 ? 5 : -20) * DEG;
-    const clampMax = (sign > 0 ? 20 : -5) * DEG;
+    // Re-clamp after smoothing — scaled by axial tilt amplitude
+    const clampMin = (sign > 0 ? 5 : -20) * DEG * seasonalAmplitude;
+    const clampMax = (sign > 0 ? 20 : -5) * DEG * seasonalAmplitude;
     for (let i = 0; i < NUM_LON; i++) {
         lats[i] = Math.max(clampMin, Math.min(clampMax, lats[i]));
     }
@@ -391,7 +394,7 @@ function pressureToWind(r_gradE, r_gradN, r_sinLat,
  * @param {number} [axialTilt=23.5] - axial tilt in degrees
  * @returns {object} pressure and wind arrays for both seasons
  */
-export function computeWind(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, noise, axialTilt = 23.5) {
+export function computeWind(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, noise, axialTilt = 23.5, params = null) {
     const numRegions = mesh.numRegions;
     const avgEdgeKm = (Math.PI * 6371) / Math.sqrt(numRegions);
     const tiltRad = axialTilt * DEG;
@@ -448,8 +451,9 @@ export function computeWind(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, noi
 
     t0 = performance.now();
     const geoSample = buildGeoIndex(r_lat, r_lon, r_sinLat, r_cosLat, r_elevation, r_isLand, numRegions);
-    const itczSummer = computeITCZ(geoSample, 'summer', tiltRad);
-    const itczWinter = computeITCZ(geoSample, 'winter', tiltRad);
+    const seasonalAmplitude = params?.seasonalAmplitude ?? 1.0;
+    const itczSummer = computeITCZ(geoSample, 'summer', tiltRad, seasonalAmplitude);
+    const itczWinter = computeITCZ(geoSample, 'winter', tiltRad, seasonalAmplitude);
     timing.push({ stage: 'Wind: ITCZ computation', ms: performance.now() - t0 });
 
     // ── Step 2–5: Compute pressure & wind for each season ──
@@ -592,6 +596,24 @@ export function computeWind(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, noi
     }
     smoothField(mesh, r_plateContinentality, contSmoothPasses);
     timing.push({ stage: 'Wind: continentality BFS', ms: performance.now() - t0 });
+
+    // ── No atmosphere: skip pressure/wind computation, return zero fields ──
+    // Geographic data (lat/lon/continentality/coast dist) is still needed
+    // by temperature.js and precipitation.js for spatial lookups.
+    if (params && params.atmosphere === 0) {
+        const zeros = new Float32Array(numRegions); // shared zero array (read-only)
+        const zeroResult = {
+            r_pressure_summer: zeros, r_pressure_winter: zeros,
+            r_wind_east_summer: zeros, r_wind_north_summer: zeros, r_wind_speed_summer: zeros,
+            r_wind_east_winter: zeros, r_wind_north_winter: zeros, r_wind_speed_winter: zeros,
+            itczLons: new Float32Array(360), itczLatsSummer: new Float32Array(360), itczLatsWinter: new Float32Array(360),
+            r_lat, r_lon, r_sinLat, r_isLand,
+            r_continentality, r_coastDistLand: r_coastDist, r_plateContinentality,
+            r_eastX, r_eastY, r_eastZ, r_northX, r_northY, r_northZ,
+            _windTiming: [{ stage: 'Wind: skipped (no atmosphere)', ms: 0 }],
+        };
+        return zeroResult;
+    }
 
     // Shared gradient scratch arrays
     const r_gradE = new Float32Array(numRegions);

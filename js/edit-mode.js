@@ -134,8 +134,17 @@ function buildHoverHTML(region, plate) {
 
     // Climate data (only if computed)
     if (state.climateComputed && d.r_temperature_summer) {
-        const tS = -45 + Math.max(0, Math.min(1, d.r_temperature_summer[region])) * 90;
-        const tW = -45 + Math.max(0, Math.min(1, d.r_temperature_winter[region])) * 90;
+        // Recover °C from normalized 0-1 using the planetary temperature scale.
+        // On Earth: dynT_MIN=-45, dynT_MAX=45 → same as the original fixed range.
+        // On alien planets, the range adapts to the planet's temperature profile.
+        const pp = state.planetaryParams;
+        const eqT      = pp?.equatorialTempC ?? 28;
+        const polarDrp = pp?.tempRangeC      ?? 47;
+        const tMin = eqT - polarDrp - 26;   // matches dynT_MIN formula in temperature.js
+        const tMax = eqT + 17;              // matches dynT_MAX formula
+        const tRange = Math.max(1, tMax - tMin);
+        const tS = tMin + Math.max(0, Math.min(1, d.r_temperature_summer[region])) * tRange;
+        const tW = tMin + Math.max(0, Math.min(1, d.r_temperature_winter[region])) * tRange;
         if (elev <= 0) {
             // Ocean: show as SST
             lines.push(`<span class="hi-label">SST</span> ${tS.toFixed(0)}°C / ${tW.toFixed(0)}°C`);

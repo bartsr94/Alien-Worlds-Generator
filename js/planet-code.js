@@ -3,27 +3,49 @@
 
 // Slider quantization tables
 const SLIDERS = [
-    { min: 5000,  step: 1000, count: 2556 }, // Detail (N)
-    { min: 0,     step: 0.05, count: 21  }, // Irregularity (jitter)
-    { min: 4,     step: 1,    count: 117 }, // Plates (P)
-    { min: 1,     step: 1,    count: 10  }, // Continents
-    { min: 0,     step: 0.01, count: 51  }, // Roughness
-    { min: 0,     step: 0.05, count: 21  }, // Smoothing
-    { min: 0,     step: 0.05, count: 21  }, // Glacial Erosion
-    { min: 0,     step: 0.05, count: 21  }, // Hydraulic Erosion
-    { min: 0,     step: 0.05, count: 21  }, // Thermal Erosion
-    { min: 0,     step: 0.05, count: 21  }, // Ridge Sharpening
-    { min: 0,     step: 0.05, count: 21  }, // Soil Creep
-    { min: 0,     step: 0.05, count: 21  }, // Terrain Warp
+    { min: 5000,  step: 1000, count: 2556 }, // [0]  Detail (N)
+    { min: 0,     step: 0.05, count: 21  }, // [1]  Irregularity (jitter)
+    { min: 4,     step: 1,    count: 117 }, // [2]  Plates (P)
+    { min: 1,     step: 1,    count: 10  }, // [3]  Continents
+    { min: 0,     step: 0.01, count: 51  }, // [4]  Roughness
+    { min: 0,     step: 0.05, count: 21  }, // [5]  Smoothing
+    { min: 0,     step: 0.05, count: 21  }, // [6]  Glacial Erosion
+    { min: 0,     step: 0.05, count: 21  }, // [7]  Hydraulic Erosion
+    { min: 0,     step: 0.05, count: 21  }, // [8]  Thermal Erosion
+    { min: 0,     step: 0.05, count: 21  }, // [9]  Ridge Sharpening
+    { min: 0,     step: 0.05, count: 21  }, // [10] Soil Creep
+    { min: 0,     step: 0.05, count: 21  }, // [11] Terrain Warp
+    // ── Planetary Physics (appended for backward compatibility) ─────────────
+    { min: 0.1,  step: 0.1,  count: 30  }, // [12] Gravity (0.1–3.0g)
+    { min: 0,    step: 1,    count: 6   }, // [13] Atmosphere (0–5)
+    { min: 0,    step: 1,    count: 6   }, // [14] Hydrosphere (0–5)
+    { min: -150, step: 5,    count: 131 }, // [15] Base Temperature (-150 to +500°C, 5° steps)
+    { min: 0,    step: 1,    count: 91  }, // [16] Axial Tilt (0–90°)
 ];
 
-// Mixed-radix bases (right-to-left): twIdx, scIdx, rsIdx, teIdx, heIdx, glIdx, smIdx, nsIdx, cnIdx, pIdx, jIdx, nIdx, seed
-const RADICES = [21, 21, 21, 21, 21, 21, 21, 51, 10, 117, 21, 2556];
+// Earth-default indices for the five new sliders (used when decoding old codes).
+// gravity index 9  = 0.1 + 9*0.1  = 1.0g
+// atmosphere index 3  = Moderate
+// hydrosphere index 3  = Moderate
+// baseTemp index 33 = -150 + 33*5 = +15°C
+// axialTilt index 23 = 23°  (nearest integer to Earth 23.5°)
+const EARTH_GRAVITY_IDX    = 9;
+const EARTH_ATM_IDX        = 3;
+const EARTH_HYDRO_IDX      = 3;
+const EARTH_BASETEMP_IDX   = 33;
+const EARTH_AXIALTILT_IDX  = 23;
+
+// Mixed-radix bases right-to-left:
+//   twIdx[0], scIdx[1], rsIdx[2], teIdx[3], heIdx[4], glIdx[5], smIdx[6],
+//   nsIdx[7], cnIdx[8], pIdx[9], jIdx[10], nIdx[11],
+//   gravIdx[12], atmIdx[13], hydroIdx[14], btIdx[15], tiltIdx[16], seed
+const RADICES = [21, 21, 21, 21, 21, 21, 21, 51, 10, 117, 21, 2556, 30, 6, 6, 131, 91];
 const SEED_MAX = 16777216; // 2^24
-const BASE_LEN = 18; // base code length (no toggles)
+const BASE_LEN  = 23; // current code length (with planetary physics sliders)
+const PREV4_LEN = 18; // previous 18-char codes (before planetary physics) — Earth defaults for new sliders
 const PREV3_LEN = 17; // previous 17-char codes (before terrain warp)
 const PREV2_LEN = 16; // previous 16-char codes (before glacial erosion)
-const PREV_LEN = 14; // previous 14-char codes (before ridge/creep)
+const PREV_LEN  = 14; // previous 14-char codes (before ridge/creep)
 const LEGACY_LEN = 13; // legacy 13-char codes (single erosion slider)
 const IDX_CHARS = 2; // base36 chars per plate index (max index 119 = "3b")
 
@@ -38,6 +60,10 @@ const PREV2_RADICES = [21, 21, 21, 21, 21, 51, 10, 117, 21, 2559];
 
 // Previous3-gen radices for decoding 17-char codes (no terrain warp)
 const PREV3_RADICES = [21, 21, 21, 21, 21, 21, 51, 10, 117, 21, 2559];
+
+// Previous4-gen radices for decoding 18-char codes (before planetary physics).
+// Identical to the first 12 entries of RADICES — kept separate for clarity.
+const PREV4_RADICES = [21, 21, 21, 21, 21, 21, 21, 51, 10, 117, 21, 2556];
 
 function toIndex(value, slider) {
     return Math.round((value - slider.min) / slider.step);
@@ -75,36 +101,58 @@ function parseBase36(str) {
  * @param {number} ridgeSharpening - Ridge Sharpening (0–1, step 0.05)
  * @param {number} soilCreep - Soil Creep (0–1, step 0.05)
  * @param {number[]} [toggledIndices=[]] - Sorted array of toggled plate indices
- * @returns {string} base36 code (18 chars without edits, 18 + '-' + 2*k with k edits)
+ * @param {number} [gravity=1.0] - Surface gravity in g (0.1–3.0)
+ * @param {number} [atmosphere=3] - Atmosphere level 0–5
+ * @param {number} [hydrosphere=3] - Hydrosphere level 0–5
+ * @param {number} [baseTemp=15] - Base temperature °C (-150–+500)
+ * @param {number} [axialTilt=23] - Axial tilt in degrees (0–90)
+ * @returns {string} base36 code (23 chars without edits, 23 + '-' + 2*k with k edits)
  */
-export function encodePlanetCode(seed, N, jitter, P, numContinents, roughness, terrainWarp, smoothing, glacialErosion, hydraulicErosion, thermalErosion, ridgeSharpening, soilCreep, toggledIndices = []) {
-    const nIdx  = toIndex(N, SLIDERS[0]);
-    const jIdx  = toIndex(jitter, SLIDERS[1]);
-    const pIdx  = toIndex(P, SLIDERS[2]);
-    const cnIdx = toIndex(numContinents, SLIDERS[3]);
-    const nsIdx = toIndex(roughness, SLIDERS[4]);
-    const smIdx = toIndex(smoothing, SLIDERS[5]);
-    const glIdx = toIndex(glacialErosion, SLIDERS[6]);
-    const heIdx = toIndex(hydraulicErosion, SLIDERS[7]);
-    const teIdx = toIndex(thermalErosion, SLIDERS[8]);
-    const rsIdx = toIndex(ridgeSharpening, SLIDERS[9]);
-    const scIdx = toIndex(soilCreep, SLIDERS[10]);
-    const twIdx = toIndex(terrainWarp, SLIDERS[11]);
+export function encodePlanetCode(
+    seed, N, jitter, P, numContinents, roughness,
+    terrainWarp, smoothing, glacialErosion, hydraulicErosion, thermalErosion, ridgeSharpening, soilCreep,
+    toggledIndices = [],
+    gravity = 1.0, atmosphere = 3, hydrosphere = 3, baseTemp = 15, axialTilt = 23
+) {
+    const nIdx    = toIndex(N, SLIDERS[0]);
+    const jIdx    = toIndex(jitter, SLIDERS[1]);
+    const pIdx    = toIndex(P, SLIDERS[2]);
+    const cnIdx   = toIndex(numContinents, SLIDERS[3]);
+    const nsIdx   = toIndex(roughness, SLIDERS[4]);
+    const smIdx   = toIndex(smoothing, SLIDERS[5]);
+    const glIdx   = toIndex(glacialErosion, SLIDERS[6]);
+    const heIdx   = toIndex(hydraulicErosion, SLIDERS[7]);
+    const teIdx   = toIndex(thermalErosion, SLIDERS[8]);
+    const rsIdx   = toIndex(ridgeSharpening, SLIDERS[9]);
+    const scIdx   = toIndex(soilCreep, SLIDERS[10]);
+    const twIdx   = toIndex(terrainWarp, SLIDERS[11]);
+    const gravIdx = toIndex(gravity,     SLIDERS[12]);
+    const atmIdx  = toIndex(atmosphere,  SLIDERS[13]);
+    const hydroIdx= toIndex(hydrosphere, SLIDERS[14]);
+    const btIdx   = toIndex(baseTemp,    SLIDERS[15]);
+    const tiltIdx = toIndex(axialTilt,   SLIDERS[16]);
 
-    // Mixed-radix packing (least-significant first: twIdx, scIdx, rsIdx, teIdx, ...)
+    // Mixed-radix packing — seed is the most-significant residual.
+    // Pack order (most→least significant): seed, tiltIdx, btIdx, hydroIdx, atmIdx,
+    //   gravIdx, nIdx, jIdx, pIdx, cnIdx, nsIdx, smIdx, glIdx, heIdx, teIdx, rsIdx, scIdx, twIdx
     let packed = BigInt(seed);
-    packed = packed * BigInt(RADICES[11]) + BigInt(nIdx);   // * 2559
-    packed = packed * BigInt(RADICES[10]) + BigInt(jIdx);   // * 21
-    packed = packed * BigInt(RADICES[9])  + BigInt(pIdx);   // * 117
-    packed = packed * BigInt(RADICES[8])  + BigInt(cnIdx);  // * 10
-    packed = packed * BigInt(RADICES[7])  + BigInt(nsIdx);  // * 51
-    packed = packed * BigInt(RADICES[6])  + BigInt(smIdx);  // * 21
-    packed = packed * BigInt(RADICES[5])  + BigInt(glIdx);  // * 21
-    packed = packed * BigInt(RADICES[4])  + BigInt(heIdx);  // * 21
-    packed = packed * BigInt(RADICES[3])  + BigInt(teIdx);  // * 21
-    packed = packed * BigInt(RADICES[2])  + BigInt(rsIdx);  // * 21
-    packed = packed * BigInt(RADICES[1])  + BigInt(scIdx);  // * 21
-    packed = packed * BigInt(RADICES[0])  + BigInt(twIdx);  // * 21
+    packed = packed * BigInt(RADICES[16]) + BigInt(tiltIdx); // * 91
+    packed = packed * BigInt(RADICES[15]) + BigInt(btIdx);   // * 131
+    packed = packed * BigInt(RADICES[14]) + BigInt(hydroIdx);// * 6
+    packed = packed * BigInt(RADICES[13]) + BigInt(atmIdx);  // * 6
+    packed = packed * BigInt(RADICES[12]) + BigInt(gravIdx); // * 30
+    packed = packed * BigInt(RADICES[11]) + BigInt(nIdx);    // * 2556
+    packed = packed * BigInt(RADICES[10]) + BigInt(jIdx);    // * 21
+    packed = packed * BigInt(RADICES[9])  + BigInt(pIdx);    // * 117
+    packed = packed * BigInt(RADICES[8])  + BigInt(cnIdx);   // * 10
+    packed = packed * BigInt(RADICES[7])  + BigInt(nsIdx);   // * 51
+    packed = packed * BigInt(RADICES[6])  + BigInt(smIdx);   // * 21
+    packed = packed * BigInt(RADICES[5])  + BigInt(glIdx);   // * 21
+    packed = packed * BigInt(RADICES[4])  + BigInt(heIdx);   // * 21
+    packed = packed * BigInt(RADICES[3])  + BigInt(teIdx);   // * 21
+    packed = packed * BigInt(RADICES[2])  + BigInt(rsIdx);   // * 21
+    packed = packed * BigInt(RADICES[1])  + BigInt(scIdx);   // * 21
+    packed = packed * BigInt(RADICES[0])  + BigInt(twIdx);   // * 21
 
     let code = packed.toString(36).padStart(BASE_LEN, '0');
 
@@ -118,11 +166,24 @@ export function encodePlanetCode(seed, N, jitter, P, numContinents, roughness, t
     return code;
 }
 
+// Earth-default planetary physics values — returned for all pre-planetary-physics codes.
+function earthPhysicsDefaults() {
+    return {
+        gravity:     fromIndex(EARTH_GRAVITY_IDX,   SLIDERS[12]),
+        atmosphere:  fromIndex(EARTH_ATM_IDX,       SLIDERS[13]),
+        hydrosphere: fromIndex(EARTH_HYDRO_IDX,     SLIDERS[14]),
+        baseTemp:    fromIndex(EARTH_BASETEMP_IDX,  SLIDERS[15]),
+        axialTilt:   fromIndex(EARTH_AXIALTILT_IDX, SLIDERS[16]),
+    };
+}
+
 /**
  * Decode a base36 planet code back into planet parameters.
- * Supports 18-char (current), 17-char (prev3), 16-char (prev2), 14-char (previous-gen), and 13-char (legacy) codes.
- * @param {string} code - base36 code (13, 14, 16, 17, or 18 chars, optionally followed by "-" + toggle indices)
- * @returns {{ seed: number, N: number, jitter: number, P: number, numContinents: number, roughness: number, terrainWarp: number, smoothing: number, glacialErosion: number, hydraulicErosion: number, thermalErosion: number, ridgeSharpening: number, soilCreep: number, toggledIndices: number[] } | null}
+ * Supports 23-char (current), 18-char (prev4), 17-char (prev3),
+ * 16-char (prev2), 14-char (prev), and 13-char (legacy) codes.
+ * Old codes get Earth defaults for the five new planetary-physics sliders.
+ * @param {string} code
+ * @returns {object|null}
  */
 export function decodePlanetCode(code) {
     if (typeof code !== 'string') return null;
@@ -134,11 +195,12 @@ export function decodePlanetCode(code) {
     const toggleStr = dashIdx === -1 ? '' : code.slice(dashIdx + 1);
 
     const isLegacy = base.length === LEGACY_LEN;
-    const isPrev = base.length === PREV_LEN;
-    const isPrev2 = base.length === PREV2_LEN;
-    const isPrev3 = base.length === PREV3_LEN;
-    const isNew = base.length === BASE_LEN;
-    if (!isLegacy && !isPrev && !isPrev2 && !isPrev3 && !isNew) return null;
+    const isPrev   = base.length === PREV_LEN;
+    const isPrev2  = base.length === PREV2_LEN;
+    const isPrev3  = base.length === PREV3_LEN;
+    const isPrev4  = base.length === PREV4_LEN;
+    const isNew    = base.length === BASE_LEN;
+    if (!isLegacy && !isPrev && !isPrev2 && !isPrev3 && !isPrev4 && !isNew) return null;
     if (!/^[0-9a-z]+$/.test(base)) return null;
     if (toggleStr && !/^[0-9a-z]+$/.test(toggleStr)) return null;
     if (toggleStr && toggleStr.length % IDX_CHARS !== 0) return null;
@@ -207,6 +269,7 @@ export function decodePlanetCode(code) {
             ridgeSharpening:  0.35,
             soilCreep:        0.05,
             toggledIndices,
+            ...earthPhysicsDefaults(),
         };
     }
 
@@ -270,6 +333,7 @@ export function decodePlanetCode(code) {
             ridgeSharpening:  0.35,
             soilCreep:        0.05,
             toggledIndices,
+            ...earthPhysicsDefaults(),
         };
     }
 
@@ -340,6 +404,7 @@ export function decodePlanetCode(code) {
             ridgeSharpening:  fromIndex(rsIdx, SLIDERS[9]),
             soilCreep:        fromIndex(scIdx, SLIDERS[10]),
             toggledIndices,
+            ...earthPhysicsDefaults(),
         };
     }
 
@@ -414,56 +479,121 @@ export function decodePlanetCode(code) {
             ridgeSharpening:  fromIndex(rsIdx, SLIDERS[9]),
             soilCreep:        fromIndex(scIdx, SLIDERS[10]),
             toggledIndices,
+            ...earthPhysicsDefaults(),
         };
     }
 
-    // New 18-char decode: all sliders including terrain warp
-    const twIdx = Number(packed % BigInt(RADICES[0]));
-    packed = packed / BigInt(RADICES[0]);
+    if (isPrev4) {
+        // Previous4-gen 18-char decode: all terrain/erosion sliders, no planetary physics.
+        // Uses PREV4_RADICES which match the first 12 entries of RADICES.
+        const twIdx = Number(packed % BigInt(PREV4_RADICES[0]));
+        packed = packed / BigInt(PREV4_RADICES[0]);
 
-    const scIdx = Number(packed % BigInt(RADICES[1]));
-    packed = packed / BigInt(RADICES[1]);
+        const scIdx = Number(packed % BigInt(PREV4_RADICES[1]));
+        packed = packed / BigInt(PREV4_RADICES[1]);
 
-    const rsIdx = Number(packed % BigInt(RADICES[2]));
-    packed = packed / BigInt(RADICES[2]);
+        const rsIdx = Number(packed % BigInt(PREV4_RADICES[2]));
+        packed = packed / BigInt(PREV4_RADICES[2]);
 
-    const teIdx = Number(packed % BigInt(RADICES[3]));
-    packed = packed / BigInt(RADICES[3]);
+        const teIdx = Number(packed % BigInt(PREV4_RADICES[3]));
+        packed = packed / BigInt(PREV4_RADICES[3]);
 
-    const heIdx = Number(packed % BigInt(RADICES[4]));
-    packed = packed / BigInt(RADICES[4]);
+        const heIdx = Number(packed % BigInt(PREV4_RADICES[4]));
+        packed = packed / BigInt(PREV4_RADICES[4]);
 
-    const glIdx = Number(packed % BigInt(RADICES[5]));
-    packed = packed / BigInt(RADICES[5]);
+        const glIdx = Number(packed % BigInt(PREV4_RADICES[5]));
+        packed = packed / BigInt(PREV4_RADICES[5]);
 
-    const smIdx = Number(packed % BigInt(RADICES[6]));
-    packed = packed / BigInt(RADICES[6]);
+        const smIdx = Number(packed % BigInt(PREV4_RADICES[6]));
+        packed = packed / BigInt(PREV4_RADICES[6]);
 
-    const nsIdx = Number(packed % BigInt(RADICES[7]));
-    packed = packed / BigInt(RADICES[7]);
+        const nsIdx = Number(packed % BigInt(PREV4_RADICES[7]));
+        packed = packed / BigInt(PREV4_RADICES[7]);
 
-    const cnIdx = Number(packed % BigInt(RADICES[8]));
-    packed = packed / BigInt(RADICES[8]);
+        const cnIdx = Number(packed % BigInt(PREV4_RADICES[8]));
+        packed = packed / BigInt(PREV4_RADICES[8]);
 
-    const pIdx = Number(packed % BigInt(RADICES[9]));
-    packed = packed / BigInt(RADICES[9]);
+        const pIdx = Number(packed % BigInt(PREV4_RADICES[9]));
+        packed = packed / BigInt(PREV4_RADICES[9]);
 
-    const jIdx = Number(packed % BigInt(RADICES[10]));
-    packed = packed / BigInt(RADICES[10]);
+        const jIdx = Number(packed % BigInt(PREV4_RADICES[10]));
+        packed = packed / BigInt(PREV4_RADICES[10]);
 
-    const nIdx = Number(packed % BigInt(RADICES[11]));
-    packed = packed / BigInt(RADICES[11]);
+        const nIdx = Number(packed % BigInt(PREV4_RADICES[11]));
+        packed = packed / BigInt(PREV4_RADICES[11]);
+
+        const seed = Number(packed);
+
+        if (seed < 0 || seed >= SEED_MAX) return null;
+        if (nIdx >= SLIDERS[0].count || jIdx >= SLIDERS[1].count ||
+            pIdx >= SLIDERS[2].count || cnIdx >= SLIDERS[3].count ||
+            nsIdx >= SLIDERS[4].count || smIdx >= SLIDERS[5].count ||
+            glIdx >= SLIDERS[6].count || heIdx >= SLIDERS[7].count ||
+            teIdx >= SLIDERS[8].count || rsIdx >= SLIDERS[9].count ||
+            scIdx >= SLIDERS[10].count || twIdx >= SLIDERS[11].count) return null;
+
+        const P = fromIndex(pIdx, SLIDERS[2]);
+
+        const toggledIndices = [];
+        if (toggleStr) {
+            for (let i = 0; i < toggleStr.length; i += IDX_CHARS) {
+                const idx = parseInt(toggleStr.slice(i, i + IDX_CHARS), 36);
+                if (isNaN(idx) || idx >= P) return null;
+                toggledIndices.push(idx);
+            }
+        }
+
+        return {
+            seed,
+            N:                fromIndex(nIdx, SLIDERS[0]),
+            jitter:           fromIndex(jIdx, SLIDERS[1]),
+            P,
+            numContinents:    fromIndex(cnIdx, SLIDERS[3]),
+            roughness:        fromIndex(nsIdx, SLIDERS[4]),
+            terrainWarp:      fromIndex(twIdx, SLIDERS[11]),
+            smoothing:        fromIndex(smIdx, SLIDERS[5]),
+            glacialErosion:   fromIndex(glIdx, SLIDERS[6]),
+            hydraulicErosion: fromIndex(heIdx, SLIDERS[7]),
+            thermalErosion:   fromIndex(teIdx, SLIDERS[8]),
+            ridgeSharpening:  fromIndex(rsIdx, SLIDERS[9]),
+            soilCreep:        fromIndex(scIdx, SLIDERS[10]),
+            toggledIndices,
+            ...earthPhysicsDefaults(),
+        };
+    }
+
+    // New 23-char decode: all sliders including planetary physics.
+    const twIdx   = Number(packed % BigInt(RADICES[0]));  packed = packed / BigInt(RADICES[0]);
+    const scIdx   = Number(packed % BigInt(RADICES[1]));  packed = packed / BigInt(RADICES[1]);
+    const rsIdx   = Number(packed % BigInt(RADICES[2]));  packed = packed / BigInt(RADICES[2]);
+    const teIdx   = Number(packed % BigInt(RADICES[3]));  packed = packed / BigInt(RADICES[3]);
+    const heIdx   = Number(packed % BigInt(RADICES[4]));  packed = packed / BigInt(RADICES[4]);
+    const glIdx   = Number(packed % BigInt(RADICES[5]));  packed = packed / BigInt(RADICES[5]);
+    const smIdx   = Number(packed % BigInt(RADICES[6]));  packed = packed / BigInt(RADICES[6]);
+    const nsIdx   = Number(packed % BigInt(RADICES[7]));  packed = packed / BigInt(RADICES[7]);
+    const cnIdx   = Number(packed % BigInt(RADICES[8]));  packed = packed / BigInt(RADICES[8]);
+    const pIdx    = Number(packed % BigInt(RADICES[9]));  packed = packed / BigInt(RADICES[9]);
+    const jIdx    = Number(packed % BigInt(RADICES[10])); packed = packed / BigInt(RADICES[10]);
+    const nIdx    = Number(packed % BigInt(RADICES[11])); packed = packed / BigInt(RADICES[11]);
+    const gravIdx = Number(packed % BigInt(RADICES[12])); packed = packed / BigInt(RADICES[12]);
+    const atmIdx  = Number(packed % BigInt(RADICES[13])); packed = packed / BigInt(RADICES[13]);
+    const hydroIdx= Number(packed % BigInt(RADICES[14])); packed = packed / BigInt(RADICES[14]);
+    const btIdx   = Number(packed % BigInt(RADICES[15])); packed = packed / BigInt(RADICES[15]);
+    const tiltIdx = Number(packed % BigInt(RADICES[16])); packed = packed / BigInt(RADICES[16]);
 
     const seed = Number(packed);
 
     // Validate ranges
     if (seed < 0 || seed >= SEED_MAX) return null;
-    if (nIdx >= SLIDERS[0].count || jIdx >= SLIDERS[1].count ||
-        pIdx >= SLIDERS[2].count || cnIdx >= SLIDERS[3].count ||
-        nsIdx >= SLIDERS[4].count || smIdx >= SLIDERS[5].count ||
-        glIdx >= SLIDERS[6].count || heIdx >= SLIDERS[7].count ||
-        teIdx >= SLIDERS[8].count || rsIdx >= SLIDERS[9].count ||
-        scIdx >= SLIDERS[10].count || twIdx >= SLIDERS[11].count) return null;
+    if (nIdx    >= SLIDERS[0].count  || jIdx  >= SLIDERS[1].count  ||
+        pIdx    >= SLIDERS[2].count  || cnIdx >= SLIDERS[3].count  ||
+        nsIdx   >= SLIDERS[4].count  || smIdx >= SLIDERS[5].count  ||
+        glIdx   >= SLIDERS[6].count  || heIdx >= SLIDERS[7].count  ||
+        teIdx   >= SLIDERS[8].count  || rsIdx >= SLIDERS[9].count  ||
+        scIdx   >= SLIDERS[10].count || twIdx >= SLIDERS[11].count ||
+        gravIdx >= SLIDERS[12].count || atmIdx >= SLIDERS[13].count ||
+        hydroIdx>= SLIDERS[14].count || btIdx >= SLIDERS[15].count ||
+        tiltIdx >= SLIDERS[16].count) return null;
 
     const P = fromIndex(pIdx, SLIDERS[2]);
 
@@ -479,18 +609,23 @@ export function decodePlanetCode(code) {
 
     return {
         seed,
-        N:                fromIndex(nIdx, SLIDERS[0]),
-        jitter:           fromIndex(jIdx, SLIDERS[1]),
+        N:                fromIndex(nIdx,     SLIDERS[0]),
+        jitter:           fromIndex(jIdx,     SLIDERS[1]),
         P,
-        numContinents:    fromIndex(cnIdx, SLIDERS[3]),
-        roughness:        fromIndex(nsIdx, SLIDERS[4]),
-        terrainWarp:      fromIndex(twIdx, SLIDERS[11]),
-        smoothing:        fromIndex(smIdx, SLIDERS[5]),
-        glacialErosion:   fromIndex(glIdx, SLIDERS[6]),
-        hydraulicErosion: fromIndex(heIdx, SLIDERS[7]),
-        thermalErosion:   fromIndex(teIdx, SLIDERS[8]),
-        ridgeSharpening:  fromIndex(rsIdx, SLIDERS[9]),
-        soilCreep:        fromIndex(scIdx, SLIDERS[10]),
+        numContinents:    fromIndex(cnIdx,    SLIDERS[3]),
+        roughness:        fromIndex(nsIdx,    SLIDERS[4]),
+        terrainWarp:      fromIndex(twIdx,    SLIDERS[11]),
+        smoothing:        fromIndex(smIdx,    SLIDERS[5]),
+        glacialErosion:   fromIndex(glIdx,    SLIDERS[6]),
+        hydraulicErosion: fromIndex(heIdx,    SLIDERS[7]),
+        thermalErosion:   fromIndex(teIdx,    SLIDERS[8]),
+        ridgeSharpening:  fromIndex(rsIdx,    SLIDERS[9]),
+        soilCreep:        fromIndex(scIdx,    SLIDERS[10]),
+        gravity:          fromIndex(gravIdx,  SLIDERS[12]),
+        atmosphere:       fromIndex(atmIdx,   SLIDERS[13]),
+        hydrosphere:      fromIndex(hydroIdx, SLIDERS[14]),
+        baseTemp:         fromIndex(btIdx,    SLIDERS[15]),
+        axialTilt:        fromIndex(tiltIdx,  SLIDERS[16]),
         toggledIndices,
     };
 }

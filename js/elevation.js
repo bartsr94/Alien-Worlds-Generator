@@ -213,7 +213,7 @@ export function expandRegions(mesh, regions, steps) {
 // ----------------------------------------------------------------
 //  Elevation assignment — combines distance fields, stress, noise
 // ----------------------------------------------------------------
-export function assignElevation(mesh, r_xyz, plateIsOcean, r_plate, plateVec, plateSeeds, noise, noiseMag, seed, spread, plateDensity) {
+export function assignElevation(mesh, r_xyz, plateIsOcean, r_plate, plateVec, plateSeeds, noise, noiseMag, seed, spread, plateDensity, params = null) {
     const { numRegions } = mesh;
     const r_elevation = new Float32Array(numRegions);
     const _timing = [];
@@ -1233,6 +1233,18 @@ export function assignElevation(mesh, r_xyz, plateIsOcean, r_plate, plateVec, pl
     for (let r = 0; r < numRegions; r++) {
         if (r_elevation[r] > 0) {
             r_elevation[r] = Math.pow(r_elevation[r], 0.9);
+        }
+    }
+
+    // Gravity scaling — higher gravity compresses terrain, lower allows taller mountains.
+    // upliftMultiplier = 1/g: at 0.5g → 2× height, at 2g → 0.5× height.
+    // Only positive (land) elevations are scaled; ocean depths are unaffected.
+    if (params && params.upliftMultiplier !== 1.0) {
+        const mult = params.upliftMultiplier;
+        for (let r = 0; r < numRegions; r++) {
+            if (r_elevation[r] > 0) {
+                r_elevation[r] *= mult;
+            }
         }
     }
 

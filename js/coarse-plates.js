@@ -16,7 +16,7 @@ const COARSE_JITTER = 0.75; // fixed — coarse mesh shape is independent of use
  * Uses isolated RNG so it doesn't affect the main mesh's random stream.
  * Jitter is fixed so plate shapes don't change when the user adjusts irregularity.
  */
-export function generateCoarsePlates(seed, numPlates, numContinents) {
+export function generateCoarsePlates(seed, numPlates, numContinents, oceanFraction = 0.70) {
     const coarseRng = makeRng(seed + 137);
     const { mesh: coarseMesh, r_xyz: coarse_xyz } = buildSphere(N_COARSE, COARSE_JITTER, coarseRng);
 
@@ -24,7 +24,7 @@ export function generateCoarsePlates(seed, numPlates, numContinents) {
         generatePlates(coarseMesh, coarse_xyz, numPlates, seed);
 
     const coarsePlateIsOcean = assignOceanLand(
-        coarseMesh, coarse_r_plate, coarsePlateSeeds, coarse_xyz, seed, numContinents
+        coarseMesh, coarse_r_plate, coarsePlateSeeds, coarse_xyz, seed, numContinents, oceanFraction
     );
 
     return {

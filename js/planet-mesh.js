@@ -19,19 +19,21 @@ const MAP_CLIP_PLANES = [
 // Cached on state to avoid redundant computation across render paths.
 let _biomeCache = null;
 let _biomeCacheKey = null;
+let _biomeModeCacheKey = null;
 
-function getCachedBiomeSmoothed(mesh, koppenArr, r_elevation) {
-    if (_biomeCache && _biomeCacheKey === koppenArr) return _biomeCache;
-    _biomeCache = smoothBiomeColors(mesh, koppenArr, r_elevation);
+function getCachedBiomeSmoothed(mesh, koppenArr, r_elevation, biomeMode = 'earth') {
+    if (_biomeCache && _biomeCacheKey === koppenArr && _biomeModeCacheKey === biomeMode) return _biomeCache;
+    _biomeCache = smoothBiomeColors(mesh, koppenArr, r_elevation, biomeMode);
     _biomeCacheKey = koppenArr;
+    _biomeModeCacheKey = biomeMode;
     return _biomeCache;
 }
 
-function smoothBiomeColors(mesh, koppenArr, r_elevation) {
+function smoothBiomeColors(mesh, koppenArr, r_elevation, biomeMode = 'earth') {
     const n = mesh.numRegions;
     const raw = new Float32Array(n * 3);
     for (let r = 0; r < n; r++) {
-        const [cr, cg, cb] = biomeColor(koppenArr[r], r_elevation[r]);
+        const [cr, cg, cb] = biomeColor(koppenArr[r], r_elevation[r], biomeMode);
         raw[r * 3] = cr; raw[r * 3 + 1] = cg; raw[r * 3 + 2] = cb;
     }
     const out = new Float32Array(n * 3);
@@ -59,18 +61,22 @@ function smoothBiomeColors(mesh, koppenArr, r_elevation) {
 }
 
 // Grayscale heightmap: black (lowest) → white (highest), in physical height space
-// Absolute-scale heightmap: fixed range -5 km (deep ocean) → 6 km (tallest peak)
-// so the same physical height always maps to the same shade regardless of planet.
+// Absolute-scale heightmap: fixed range -5 km (deep ocean) → max land peak.
+// Max land height scales with gravity (6 km at 1g, higher on low-gravity worlds).
 function heightmapColor(elevation) {
     const h = elevToHeightKm(elevation);
-    const t = Math.max(0, Math.min(1, (h + 5) / 11)); // -5 → 0, 6 → 1
+    const uplift = state.planetaryParams?.upliftMultiplier ?? 1;
+    const maxKm = 6 * uplift; // equals 6/g
+    const t = Math.max(0, Math.min(1, (h + 5) / (maxKm + 5))); // -5 → 0, maxKm → 1
     return [t, t, t];
 }
 
-// Land heightmap: ocean = black, land = 0 → 6 km absolute scale
+// Land heightmap: ocean = black, land = 0 → max km absolute scale.
 function landHeightmapColor(elevation) {
     if (elevation <= 0) return [0, 0, 0];
-    const t = Math.max(0, Math.min(1, elevToHeightKm(elevation) / 6));
+    const uplift = state.planetaryParams?.upliftMultiplier ?? 1;
+    const maxKm = 6 * uplift;
+    const t = Math.max(0, Math.min(1, elevToHeightKm(elevation) / maxKm));
     return [t, t, t];
 }
 
@@ -177,6 +183,23 @@ function koppenColor(classId) {
     return c.color;
 }
 
+// Hydrosphere state color: 0=liquid ocean, 1=frozen, 2=dry basin, 3=land
+function hydroStateColor(state) {
+    if (state === 0) return [0.04, 0.18, 0.68]; // liquid ocean — deep blue
+    if (state === 1) return [0.80, 0.90, 0.97]; // frozen — icy white-blue
+    if (state === 2) return [0.72, 0.55, 0.28]; // dry basin — dusty tan
+    return [0.34, 0.30, 0.26];                   // land — neutral grey-brown
+}
+
+// Habitability index color: 0=inhospitable (red), 0.5=marginal (yellow), 1=habitable (green)
+function habitabilityColor(t) {
+    const v = Math.max(0, Math.min(1, t));
+    if (v <= 0)    return [0.20, 0.08, 0.08];
+    if (v <  0.25) { const s = v / 0.25;         return [0.75,  s * 0.40,         0.05]; }       // red → orange
+    if (v <  0.55) { const s = (v - 0.25) / 0.3; return [0.75 - s * 0.55, 0.40 + s * 0.30, 0.05]; } // orange → yellow
+    return [0.08, 0.72, 0.22];                    // green (habitable)
+}
+
 // Plate colours — green shades for land, blue for ocean.
 export function computePlateColors(plateSeeds, plateIsOcean) {
     state.plateColors = {};
@@ -228,7 +251,11 @@ export function buildMapMesh() {
     const koppenArr = (isKoppen || isBiome) ? (debugLayers && debugLayers.koppen) : null;
     const isCont = debugLayer === 'continentality';
     const contArr = isCont ? (debugLayers && debugLayers.continentality) : null;
-    if (!isHeightmap && !isLandHeightmap && !isOceanCurrent && !isPrecip && !isRainShadow && !isTemp && !isKoppen && !isBiome && !isCont && debugLayer && debugLayers && debugLayers[debugLayer]) {
+    const isHydroState = debugLayer === 'hydroState';
+    const hydroStateArr = isHydroState ? (debugLayers && debugLayers.hydroState) : null;
+    const isHabitability = debugLayer === 'habitability';
+    const habitabilityArr = isHabitability ? (debugLayers && debugLayers.habitability) : null;
+    if (!isHeightmap && !isLandHeightmap && !isOceanCurrent && !isPrecip && !isRainShadow && !isTemp && !isKoppen && !isBiome && !isCont && !isHydroState && !isHabitability && debugLayer && debugLayers && debugLayers[debugLayer]) {
         dbgArr = debugLayers[debugLayer];
         for (let r = 0; r < mesh.numRegions; r++) {
             if (dbgArr[r] < dbgMin) dbgMin = dbgArr[r];
@@ -248,7 +275,8 @@ export function buildMapMesh() {
         return l;
     }
 
-    const biomeSmoothed = (isBiome && koppenArr) ? getCachedBiomeSmoothed(mesh, koppenArr, r_elevation) : null;
+    const biomeMode = state.planetaryParams?.biomeMode ?? 'earth';
+    const biomeSmoothed = (isBiome && koppenArr) ? getCachedBiomeSmoothed(mesh, koppenArr, r_elevation, biomeMode) : null;
 
     // Upper-bound allocation: wrapping sides produce 2 triangles, non-wrapping 1.
     // Wraps are rare, so 2× is a conservative upper bound; trimmed after the loop.
@@ -276,6 +304,10 @@ export function buildMapMesh() {
             [cr, cg, cb] = precipitationColor(precipArr[br]);
         } else if (isRainShadow && rainShadowArr) {
             [cr, cg, cb] = rainShadowColor(rainShadowArr[br]);
+        } else if (isHydroState && hydroStateArr) {
+            [cr, cg, cb] = hydroStateColor(hydroStateArr[br]);
+        } else if (isHabitability && habitabilityArr) {
+            [cr, cg, cb] = habitabilityColor(habitabilityArr[br]);
         } else if (isOceanCurrent && oceanWarmth && oceanSpeed) {
             [cr, cg, cb] = oceanCurrentColor(oceanWarmth[br], oceanSpeed[br], r_elevation[br] <= 0);
         } else if (isOceanCurrent) {
@@ -557,7 +589,11 @@ export function buildMesh() {
     const koppenArr = (isKoppen || isBiome) ? (debugLayers && debugLayers.koppen) : null;
     const isCont = debugLayer === 'continentality';
     const contArr = isCont ? (debugLayers && debugLayers.continentality) : null;
-    if (!isHeightmap && !isLandHeightmap && !isOceanCurrent && !isPrecip && !isRainShadow && !isTemp && !isKoppen && !isBiome && !isCont && debugLayer && debugLayers && debugLayers[debugLayer]) {
+    const isHydroState = debugLayer === 'hydroState';
+    const hydroStateArr = isHydroState ? (debugLayers && debugLayers.hydroState) : null;
+    const isHabitability = debugLayer === 'habitability';
+    const habitabilityArr = isHabitability ? (debugLayers && debugLayers.habitability) : null;
+    if (!isHeightmap && !isLandHeightmap && !isOceanCurrent && !isPrecip && !isRainShadow && !isTemp && !isKoppen && !isBiome && !isCont && !isHydroState && !isHabitability && debugLayer && debugLayers && debugLayers[debugLayer]) {
         dbgArr = debugLayers[debugLayer];
         for (let r = 0; r < mesh.numRegions; r++) {
             if (dbgArr[r] < dbgMin) dbgMin = dbgArr[r];
@@ -573,7 +609,8 @@ export function buildMesh() {
     const pos = new Float32Array(numSides * 9);
     const col = new Float32Array(numSides * 9);
 
-    const biomeSmoothed = (isBiome && koppenArr) ? getCachedBiomeSmoothed(mesh, koppenArr, r_elevation) : null;
+    const biomeMode = state.planetaryParams?.biomeMode ?? 'earth';
+    const biomeSmoothed = (isBiome && koppenArr) ? getCachedBiomeSmoothed(mesh, koppenArr, r_elevation, biomeMode) : null;
 
     for (let s = 0; s < numSides; s++) {
         const it = mesh.s_inner_t(s);
@@ -630,6 +667,10 @@ export function buildMesh() {
             [cr, cg, cb] = precipitationColor(precipArr[br]);
         } else if (isRainShadow && rainShadowArr) {
             [cr, cg, cb] = rainShadowColor(rainShadowArr[br]);
+        } else if (isHydroState && hydroStateArr) {
+            [cr, cg, cb] = hydroStateColor(hydroStateArr[br]);
+        } else if (isHabitability && habitabilityArr) {
+            [cr, cg, cb] = habitabilityColor(habitabilityArr[br]);
         } else if (isOceanCurrent && oceanWarmth && oceanSpeed) {
             [cr, cg, cb] = oceanCurrentColor(oceanWarmth[br], oceanSpeed[br], r_elevation[br] <= 0);
         } else if (isOceanCurrent) {
@@ -679,7 +720,8 @@ export function buildMesh() {
     state.planetMesh = new THREE.Mesh(geo, mat);
     scene.add(state.planetMesh);
 
-    waterMesh.visible = !state.mapMode && !showPlates && !showStress && !debugLayer;
+    waterMesh.visible = !state.mapMode && !showPlates && !showStress && !debugLayer &&
+                         state.planetaryParams?.surfaceFluidColor !== null;
 
     // Voronoi-edge wireframe
     if (document.getElementById('chkWire').checked) {
@@ -771,7 +813,11 @@ export function updateMeshColors() {
     const koppenArr = (isKoppen || isBiome) ? (debugLayers && debugLayers.koppen) : null;
     const isCont = debugLayer === 'continentality';
     const contArr = isCont ? (debugLayers && debugLayers.continentality) : null;
-    if (!isHeightmap && !isLandHeightmap && !isOceanCurrent && !isPrecip && !isRainShadow && !isTemp && !isKoppen && !isBiome && !isCont && debugLayer && debugLayers && debugLayers[debugLayer]) {
+    const isHydroState = debugLayer === 'hydroState';
+    const hydroStateArr = isHydroState ? (debugLayers && debugLayers.hydroState) : null;
+    const isHabitability = debugLayer === 'habitability';
+    const habitabilityArr = isHabitability ? (debugLayers && debugLayers.habitability) : null;
+    if (!isHeightmap && !isLandHeightmap && !isOceanCurrent && !isPrecip && !isRainShadow && !isTemp && !isKoppen && !isBiome && !isCont && !isHydroState && !isHabitability && debugLayer && debugLayers && debugLayers[debugLayer]) {
         dbgArr = debugLayers[debugLayer];
         for (let r = 0; r < mesh.numRegions; r++) {
             if (dbgArr[r] < dbgMin) dbgMin = dbgArr[r];
@@ -780,7 +826,8 @@ export function updateMeshColors() {
     }
 
     // Precompute smoothed biome colors (one-pass neighbor blend)
-    const biomeSmoothed = (isBiome && koppenArr) ? getCachedBiomeSmoothed(mesh, koppenArr, r_elevation) : null;
+    const biomeMode = state.planetaryParams?.biomeMode ?? 'earth';
+    const biomeSmoothed = (isBiome && koppenArr) ? getCachedBiomeSmoothed(mesh, koppenArr, r_elevation, biomeMode) : null;
 
     // Color helper — returns [r,g,b] for a given region
     const getRegionColor = (br) => {
@@ -792,6 +839,8 @@ export function updateMeshColors() {
         if (isRainShadow && rainShadowArr) return rainShadowColor(rainShadowArr[br]);
         if (isOceanCurrent && oceanWarmth && oceanSpeed) return oceanCurrentColor(oceanWarmth[br], oceanSpeed[br], r_elevation[br] <= 0);
         if (isOceanCurrent) return [0.5, 0, 0.5];
+        if (isHydroState && hydroStateArr) return hydroStateColor(hydroStateArr[br]);
+        if (isHabitability && habitabilityArr) return habitabilityColor(habitabilityArr[br]);
         if (isLandHeightmap) return landHeightmapColor(r_elevation[br]);
         if (isHeightmap) return heightmapColor(r_elevation[br]);
         if (dbgArr) return debugValueToColor(dbgArr[br], dbgMin, dbgMax);
@@ -853,7 +902,8 @@ export function updateMeshColors() {
     }
 
     // Update water visibility
-    waterMesh.visible = !state.mapMode && !showPlates && !showStress && !debugLayer;
+    waterMesh.visible = !state.mapMode && !showPlates && !showStress && !debugLayer &&
+                         state.planetaryParams?.surfaceFluidColor !== null;
 
     updateHoverHighlight();
     updateMapHoverHighlight();
@@ -1560,7 +1610,8 @@ export async function exportMap(type, width, onProgress) {
     // Climate-dependent export types (Satellite / Köppen)
     const debugLayers = state.curData.debugLayers;
     const koppenArr = (type === 'biome' || type === 'koppen') ? (debugLayers && debugLayers.koppen) : null;
-    const biomeSmoothed = (type === 'biome' && koppenArr) ? getCachedBiomeSmoothed(mesh, koppenArr, r_elevation) : null;
+    const biomeMode = state.planetaryParams?.biomeMode ?? 'earth';
+    const biomeSmoothed = (type === 'biome' && koppenArr) ? getCachedBiomeSmoothed(mesh, koppenArr, r_elevation, biomeMode) : null;
 
     // Build map triangles (same projection as buildMapMesh, chosen coloring, no grid)
     const { numSides } = mesh;
@@ -1769,7 +1820,8 @@ export async function exportMapBatch(types, width, onProgress) {
     const { mesh, r_xyz, t_xyz, r_elevation } = state.curData;
     const debugLayers = state.curData.debugLayers;
     const koppenArr = debugLayers && debugLayers.koppen;
-    const biomeSmoothed = koppenArr ? getCachedBiomeSmoothed(mesh, koppenArr, r_elevation) : null;
+    const biomeMode = state.planetaryParams?.biomeMode ?? 'earth';
+    const biomeSmoothed = koppenArr ? getCachedBiomeSmoothed(mesh, koppenArr, r_elevation, biomeMode) : null;
     const { numSides } = mesh;
     const PI = Math.PI;
     const sx = 2 / PI;

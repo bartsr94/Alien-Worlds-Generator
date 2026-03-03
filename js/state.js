@@ -28,4 +28,8 @@ export const state = {
     editMode: false,
     oceanCurrentArrowGroup: null,
     climateComputed: false,
+    // Planetary Physics — populated after each generation.
+    planetaryParams: null,
+    // Currently selected world preset name ('earth', 'mars', 'venus', … or 'custom').
+    currentPreset: 'custom',
 };

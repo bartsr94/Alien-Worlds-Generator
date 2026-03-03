@@ -201,9 +201,25 @@ function smoothOcean(mesh, field, r_isOcean, passes) {
  * @param {object} windResult - output from computeWind() (includes lat, lon, sinLat, isLand, tangent frames, ITCZ arrays)
  * @returns {object} current vectors, warmth, and speed arrays for both seasons
  */
-export function computeOceanCurrents(mesh, r_xyz, r_elevation, windResult) {
+export function computeOceanCurrents(mesh, r_xyz, r_elevation, windResult, params = null) {
     console.log('[ocean.js] computeOceanCurrents called, numRegions:', mesh.numRegions);
     const numRegions = mesh.numRegions;
+
+    // No liquid ocean — skip all current simulation
+    if (params && params.hasLiquidOcean === false) {
+        const zeros = new Float32Array(numRegions);
+        return {
+            r_ocean_current_east_summer:  zeros,
+            r_ocean_current_north_summer: zeros,
+            r_ocean_speed_summer:         zeros,
+            r_ocean_warmth_summer:        zeros,
+            r_ocean_current_east_winter:  zeros,
+            r_ocean_current_north_winter: zeros,
+            r_ocean_speed_winter:         zeros,
+            r_ocean_warmth_winter:        zeros,
+            _oceanTiming: [{ stage: 'Ocean: skipped (no liquid ocean)', ms: 0 }],
+        };
+    }
     const avgEdgeKm = (Math.PI * 6371) / Math.sqrt(numRegions);
     const timing = [];
 

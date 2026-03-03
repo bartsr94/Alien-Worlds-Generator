@@ -214,6 +214,9 @@ button#generate.generating {
     display: flex; justify-content: space-between;
     font-size: 10px; color: #667;
 }
+.legend-discrete { display: flex; gap: 6px 10px; flex-wrap: wrap; padding: 2px 0; }
+.ld-item { display: flex; align-items: center; gap: 5px; font-size: 10px; color: #9ab; white-space: nowrap; }
+.ld-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
 
 .legend-koppen {
     display: grid;
@@ -327,6 +330,12 @@ button#generate.generating {
 .detail-warn:empty { display: none; }
 .detail-warn.orange { color: #e8a020; }
 .detail-warn.red { color: #d04030; }
+
+/* Planetary physics constraint warnings */
+.planet-warning { font-size: 11px; line-height: 1.45; border-radius: 4px; margin-top: 6px; padding: 0; max-height: 0; overflow: hidden; transition: max-height 0.2s ease, padding 0.2s ease; }
+.planet-warning:not(:empty) { max-height: 120px; padding: 6px 8px; }
+.planet-warning.warn  { background: rgba(232,160,32,0.12); border: 1px solid rgba(232,160,32,0.35); color: #e8a030; }
+.planet-warning.error { background: rgba(208,64,48,0.12); border: 1px solid rgba(208,64,48,0.35); color: #d04030; }
 #topInfo {
     position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
     font-size: 13px; color: #889;

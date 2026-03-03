@@ -14,6 +14,71 @@ import { classifyKoppen } from './koppen.js';
 // Main thread still needs Delaunator for SphereMesh reconstruction
 setDelaunator(Delaunator);
 
+/**
+ * Compute per-region Planetary inspection layers (Hydrosphere State,
+ * Habitability Index).  Requires climate data to be present in curData.
+ */
+function computePlanetaryDebugLayers(curData, planetaryParams) {
+    const { mesh, r_elevation,
+            r_temperature_summer,
+            r_precip_summer, r_precip_winter } = curData;
+    const pp = planetaryParams;
+    const n  = mesh.numRegions;
+
+    // Temperature scale — mirrors temperature.js logic
+    const eqT    = pp?.equatorialTempC ?? 28;
+    const pdrop  = pp?.tempRangeC      ?? 47;
+    const tMin   = eqT - pdrop - 26;
+    const tRange = Math.max(1, (eqT + 17) - tMin);
+    const hasLiquidOcean = pp?.hasLiquidOcean ?? true;
+    const baseTempC      = pp?.equatorialTempC ?? 28; // global proxy
+
+    // --- Hydrosphere State (Uint8Array: 0=liquid, 1=frozen, 2=dry, 3=land) ---
+    const r_hydro_state = new Uint8Array(n);
+    for (let r = 0; r < n; r++) {
+        if (r_elevation[r] > 0) {
+            r_hydro_state[r] = 3;
+        } else if (hasLiquidOcean) {
+            r_hydro_state[r] = 0;
+        } else if (baseTempC < -80) {
+            r_hydro_state[r] = 1; // frozen ocean
+        } else {
+            r_hydro_state[r] = 2; // evaporated / dry basin
+        }
+    }
+
+    // --- Habitability Index (Float32Array 0–1) ---
+    const r_habitability = new Float32Array(n);
+    for (let r = 0; r < n; r++) {
+        // Convert normalised summer temperature back to °C
+        const tempNorm  = r_temperature_summer ? Math.max(0, Math.min(1, r_temperature_summer[r])) : 0.5;
+        const tempC     = tMin + tempNorm * tRange;
+
+        // Temperature score: peak at 10–35°C, zero outside −20…+60°C
+        let tempScore;
+        if      (tempC < -20) tempScore = 0;
+        else if (tempC <  10) tempScore = (tempC + 20) / 30;
+        else if (tempC <= 35) tempScore = 1.0;
+        else if (tempC <= 60) tempScore = 1.0 - (tempC - 35) / 25;
+        else                  tempScore = 0;
+
+        // Water score
+        let waterScore;
+        if (r_elevation[r] <= 0 && hasLiquidOcean) {
+            waterScore = 1.0;
+        } else if (r_precip_summer && r_precip_winter) {
+            const precip = (r_precip_summer[r] + r_precip_winter[r]) * 0.5;
+            waterScore = Math.min(1.0, precip * 2.5);
+        } else {
+            waterScore = 0;
+        }
+
+        r_habitability[r] = tempScore * waterScore;
+    }
+
+    return { r_hydro_state, r_habitability };
+}
+
 // --- Worker setup ---
 let worker = null;
 let workerSupported = true;
@@ -269,6 +334,14 @@ if (worker) {
                         d.debugLayers.koppen = classifyKoppen(mesh, d.r_elevation,
                             { r_temperature_summer: d.r_temperature_summer, r_temperature_winter: d.r_temperature_winter },
                             { r_precip_summer: d.r_precip_summer, r_precip_winter: d.r_precip_winter });
+                        // Planetary inspection layers (depend on climate)
+                        try {
+                            const planetary = computePlanetaryDebugLayers(d, state.planetaryParams);
+                            d.debugLayers.hydroState   = planetary.r_hydro_state;
+                            d.debugLayers.habitability = planetary.r_habitability;
+                        } catch (e) {
+                            console.warn('[generate.js] Planetary debug layers failed:', e);
+                        }
                     }
                 }
 
@@ -689,6 +762,10 @@ function generateFallback(overrideSeed, toggledIndices, onProgress, skipClimate)
     const thermalErosion = +document.getElementById('sTEr').value;
     const ridgeSharpening = +document.getElementById('sRs').value;
     const glacialErosion = +document.getElementById('sGl').value;
+    // Planetary physics sliders needed for oceanFraction
+    const _hydro = +(document.getElementById('sHydro')?.value ?? 3);
+    const _hydroToFrac = [0, 0.05, 0.25, 0.70, 0.80, 0.95];
+    const _oceanFraction = _hydroToFrac[_hydro] ?? 0.70;
     const progress = onProgress || (() => {});
     const ctx = {};
 
@@ -702,7 +779,7 @@ function generateFallback(overrideSeed, toggledIndices, onProgress, skipClimate)
         }},
         { pct: 10, label: 'Generating coarse plates\u2026', work() {
             const { coarseMesh, coarse_xyz, coarse_r_plate, coarsePlateSeeds, coarsePlateVec, coarsePlateIsOcean } =
-                m.coarsePlates.generateCoarsePlates(ctx.seed, P, numContinents);
+                m.coarsePlates.generateCoarsePlates(ctx.seed, P, numContinents, _oceanFraction);
             ctx.coarseMesh = coarseMesh; ctx.coarse_xyz = coarse_xyz;
             ctx.coarse_r_plate = coarse_r_plate;
             ctx.plateSeeds = coarsePlateSeeds; ctx.plateVec = coarsePlateVec;
@@ -775,6 +852,16 @@ function generateFallback(overrideSeed, toggledIndices, onProgress, skipClimate)
                 debugLayers.tempSummer = tempResult.r_temperature_summer;
                 debugLayers.tempWinter = tempResult.r_temperature_winter;
                 debugLayers.koppen = classifyKoppen(ctx.mesh, r_elevation, tempResult, precipResult);
+                // Planetary inspection layers
+                try {
+                    const curDataProxy = { mesh: ctx.mesh, r_elevation, r_temperature_summer: tempResult.r_temperature_summer,
+                                          r_precip_summer: precipResult.r_precip_summer, r_precip_winter: precipResult.r_precip_winter };
+                    const planetary = computePlanetaryDebugLayers(curDataProxy, state.planetaryParams);
+                    debugLayers.hydroState   = planetary.r_hydro_state;
+                    debugLayers.habitability = planetary.r_habitability;
+                } catch (e) {
+                    console.warn('[generate.js] Planetary debug layers failed (sync):', e);
+                }
             }
             const t_elevation = new Float32Array(ctx.mesh.numTriangles);
             for (let t = 0; t < ctx.mesh.numTriangles; t++) {
@@ -861,11 +948,17 @@ export function generate(overrideSeed, toggledIndices = [], onProgress, skipClim
     const thermalErosion = +document.getElementById('sTEr').value;
     const ridgeSharpening = +document.getElementById('sRs').value;
     const glacialErosion = +document.getElementById('sGl').value;
+    const gravity     = +(document.getElementById('sGravity')?.value  ?? 1.0);
+    const atmosphere  = +(document.getElementById('sAtm')?.value      ?? 3);
+    const hydrosphere = +(document.getElementById('sHydro')?.value    ?? 3);
+    const baseTemp    = +(document.getElementById('sBaseTemp')?.value  ?? 15);
+    const axialTilt   = +(document.getElementById('sTilt')?.value     ?? 23);
 
     worker.postMessage({
         cmd: 'generate',
         N, P, jitter, nMag, numContinents,
         terrainWarp, smoothing, hydraulicErosion, thermalErosion, ridgeSharpening, glacialErosion,
+        gravity, atmosphere, hydrosphere, baseTemp, axialTilt,
         seed: overrideSeed,
         toggledIndices,
         skipClimate
@@ -889,6 +982,11 @@ export function reapplyViaWorker(onDone, skipClimate = false) {
         hydraulicErosion: +document.getElementById('sHEr').value,
         thermalErosion: +document.getElementById('sTEr').value,
         ridgeSharpening: +document.getElementById('sRs').value,
+        gravity:     +(document.getElementById('sGravity')?.value  ?? 1.0),
+        atmosphere:  +(document.getElementById('sAtm')?.value      ?? 3),
+        hydrosphere: +(document.getElementById('sHydro')?.value    ?? 3),
+        baseTemp:    +(document.getElementById('sBaseTemp')?.value  ?? 15),
+        axialTilt:   +(document.getElementById('sTilt')?.value     ?? 23),
         skipClimate
     });
 }
@@ -912,6 +1010,11 @@ export function editRecomputeViaWorker(onDone, skipClimate = false) {
         hydraulicErosion: +document.getElementById('sHEr').value,
         thermalErosion: +document.getElementById('sTEr').value,
         ridgeSharpening: +document.getElementById('sRs').value,
+        gravity:     +(document.getElementById('sGravity')?.value  ?? 1.0),
+        atmosphere:  +(document.getElementById('sAtm')?.value      ?? 3),
+        hydrosphere: +(document.getElementById('sHydro')?.value    ?? 3),
+        baseTemp:    +(document.getElementById('sBaseTemp')?.value  ?? 15),
+        axialTilt:   +(document.getElementById('sTilt')?.value     ?? 23),
         skipClimate
     });
 }

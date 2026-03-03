@@ -4,11 +4,16 @@
 
 import { makeRng } from './rng.js';
 
-export function assignOceanLand(mesh, r_plate, plateSeeds, r_xyz, seed, numContinents) {
+export function assignOceanLand(mesh, r_plate, plateSeeds, r_xyz, seed, numContinents, oceanFraction = 0.70) {
     const rng = makeRng(seed + 42);
     const numRegions = mesh.numRegions;
     const plateIds = Array.from(plateSeeds);
     const numPlates = plateIds.length;
+
+    // Short-circuit: no hydrosphere — every plate is land, no oceanic plates at all.
+    if (oceanFraction <= 0) return new Set();
+    // Short-circuit: fully flooded — every plate is oceanic.
+    if (oceanFraction >= 1) return new Set(plateIds);
     const { adjOffset, adjList } = mesh;
 
     // 1. Plate areas and centroids
@@ -62,7 +67,7 @@ export function assignOceanLand(mesh, r_plate, plateSeeds, r_xyz, seed, numConti
         for (const pid of plateIds) plateCompact[pid] /= maxCompact;
     }
 
-    const targetLandArea = 0.3 * numRegions;
+    const targetLandArea = (1 - oceanFraction) * numRegions;
 
     // 3. Pick continent seeds via farthest-point sampling
     const effectiveNum = Math.min(numContinents, numPlates);

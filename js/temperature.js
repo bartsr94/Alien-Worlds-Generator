@@ -66,7 +66,7 @@ function diffuseOceanWarmth(mesh, r_oceanWarmth, r_isLand, r_plateContinentality
  * @param {object} precipResult - output from computePrecipitation()
  * @returns {{ r_temperature_summer, r_temperature_winter, _tempTiming }}
  */
-export function computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanResult, precipResult) {
+export function computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanResult, precipResult, params = null) {
     const numRegions = mesh.numRegions;
     const timing = [];
 
@@ -75,9 +75,22 @@ export function computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanRe
     // Minimal smoothing: 1 pass just to blend cell-to-cell noise
     const smoothPasses = 1;
 
-    const T_MIN = -45;
-    const T_MAX = 45;
-    const T_RANGE = T_MAX - T_MIN;
+    // ── Planetary params ──────────────────────────────────────────────────────
+    // equatorialT: peak temperature at the thermal equator (ITCZ).
+    //   Earth default = 28°C (baseTemp 15 + 13°C tropical offset + 0 greenhouse).
+    // polarDrop: total temperature fall from equatorial peak to poles.
+    //   Earth default = 47°C. Thick atmospheres compress this; thin expand it.
+    // seasonAmp: multiplier for seasonal temperature deviation.
+    //   Earth default = 1.0 (axialTilt 23.5°). Zero tilt → no seasonal swing.
+    const equatorialT = params?.equatorialTempC ?? 28;
+    const polarDrop   = params?.tempRangeC      ?? 47;
+    const seasonAmp   = params?.seasonalAmplitude ?? 1.0;
+
+    // Dynamic normalization range — derived so that Earth defaults reproduce the
+    // original fixed -45 to +45°C range exactly (28+17=45, 28-47-26=-45).
+    const dynT_MAX   = equatorialT + 17;
+    const dynT_MIN   = equatorialT - polarDrop - 26;
+    const dynT_RANGE = Math.max(1, dynT_MAX - dynT_MIN);
 
     const result = {};
 
@@ -125,13 +138,13 @@ export function computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanRe
             const itczLat = itczLookup(lon);
             const distItcz = Math.abs(lat - itczLat) / DEG;
             const tItcz = Math.max(0, distItcz - tropicalHW) / maxDist;
-            const T_itcz = 28 - 47 * Math.pow(tItcz, 1.4);
+            const T_itcz = equatorialT - polarDrop * Math.pow(tItcz, 1.4);
 
             // Flat reference curve (ITCZ at 5° in summer hemisphere)
             const flatItczLat = (name === 'summer' ? 5 : -5) * DEG;
             const distFlat = Math.abs(lat - flatItczLat) / DEG;
             const tFlat = Math.max(0, distFlat - tropicalHW) / maxDist;
-            const T_flat = 28 - 47 * Math.pow(tFlat, 1.4);
+            const T_flat = equatorialT - polarDrop * Math.pow(tFlat, 1.4);
 
             // Blend: ITCZ curve dominates tropics, flat curve dominates poles
             const absLatDeg = Math.abs(lat) / DEG;
@@ -188,7 +201,7 @@ export function computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanRe
             {
                 const distAnn = Math.abs(lat) / DEG; // distance from equator
                 const tAnn = Math.max(0, distAnn - tropicalHW) / maxDist;
-                const T_annual = 28 - 47 * Math.pow(tAnn, 1.4);  // match new curve
+                const T_annual = equatorialT - polarDrop * Math.pow(tAnn, 1.4);  // match new curve
                 // Apply same moisture-dependent lapse to annual baseline
                 const T_ann_adj = isLand && elev > 0
                     ? T_annual - lapse * elevToHeightKm(elev)
@@ -197,7 +210,8 @@ export function computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanRe
                 // Latitude-dependent seasonal boost: ITCZ shift alone gives ~5-6°C
                 // swing; real planets have 15-25°C from direct solar heating.
                 // Peaks at 55-75° latitude, zero at equator and poles.
-                const seasonalBoost = 12 * smoothstep(10, 55, distAnn)
+                // seasonAmp scales this with axial tilt (0 at tilt=0, 1.0 at Earth 23.5°).
+                const seasonalBoost = 12 * seasonAmp * smoothstep(10, 55, distAnn)
                                          * (1 - smoothstep(75, 90, distAnn));
                 const isLocalSummer = (name === 'summer') ? (lat >= 0) : (lat < 0);
                 const seasonSign = isLocalSummer ? 1 : -1;
@@ -217,10 +231,10 @@ export function computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanRe
         smoothField(mesh, temp, smoothPasses);
         const tSmooth = performance.now() - tSmooth0;
 
-        // ── 8. Normalize to 0-1 using fixed range ──
+        // ── 8. Normalize to 0-1 using dynamic planetary range ──
         const tNorm0 = performance.now();
         for (let r = 0; r < numRegions; r++) {
-            temp[r] = Math.max(0, Math.min(1, (temp[r] - T_MIN) / T_RANGE));
+            temp[r] = Math.max(0, Math.min(1, (temp[r] - dynT_MIN) / dynT_RANGE));
         }
         const tNorm = performance.now() - tNorm0;
 
@@ -232,5 +246,9 @@ export function computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanRe
     }
 
     result._tempTiming = timing;
+    // Expose the normalization scale so downstream consumers (e.g. hover tooltip)
+    // can convert normalized 0–1 back to °C for alien temperature ranges.
+    result.tempScaleMin = dynT_MIN;
+    result.tempScaleMax = dynT_MAX;
     return result;
 }

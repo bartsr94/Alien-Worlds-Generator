@@ -116,7 +116,7 @@ export function computeHeuristicWindField(numRegions, r_lat, r_lon, itczLookup) 
  * @param {Int32Array} r_coastDistLand - BFS hop distance from coast through land
  * @returns {{ r_precip_summer, r_precip_winter }}
  */
-export function computeHeuristicPrecipitation(mesh, r_xyz, r_elevation, windResult, r_elevGradE, r_elevGradN, r_coastDistLand) {
+export function computeHeuristicPrecipitation(mesh, r_xyz, r_elevation, windResult, r_elevGradE, r_elevGradN, r_coastDistLand, params = null) {
     const numRegions = mesh.numRegions;
     const { r_lat, r_lon, r_isLand, r_continentality } = windResult;
 

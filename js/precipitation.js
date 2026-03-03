@@ -193,9 +193,21 @@ function advectMoisture(mesh, r_xyz, r_heightKm, r_isLand,
  * @param {object} oceanResult - output from computeOceanCurrents()
  * @returns {{ r_precip_summer, r_precip_winter }} normalized 0–1 arrays
  */
-export function computePrecipitation(mesh, r_xyz, r_elevation, windResult, oceanResult) {
+export function computePrecipitation(mesh, r_xyz, r_elevation, windResult, oceanResult, params = null) {
     console.log('[precipitation.js] computePrecipitation called, numRegions:', mesh.numRegions);
     const numRegions = mesh.numRegions;
+
+    // No precipitation on airless or waterless worlds — return zero fields immediately.
+    const precipScale = params?.precipitationScale ?? 1.0;
+    if (precipScale === 0) {
+        const zeros = new Float32Array(numRegions);
+        return {
+            r_precip_summer: zeros, r_precip_winter: zeros,
+            r_rainshadow_summer: zeros, r_rainshadow_winter: zeros,
+            _precipTiming: [{ stage: 'Precip: skipped (no atmosphere/hydrosphere)', ms: 0 }],
+        };
+    }
+
     const timing = [];
 
     const { r_lat, r_lon, r_isLand, r_continentality,
@@ -672,6 +684,16 @@ export function computePrecipitation(mesh, r_xyz, r_elevation, windResult, ocean
         result[`r_precip_${seasonName}`] = blended;
     }
     timing.push({ stage: 'Precip: heuristic blend+normalize', ms: performance.now() - t0 });
+
+    // Apply planetary precipitation scale — world-wide multiplier from atmosphere/hydrosphere.
+    // precipScale=1.0 (Earth) leaves values unchanged. precipScale<1 dims precipitation globally
+    // while preserving the spatial wet/dry pattern (mountains still wetter than lowlands).
+    if (precipScale !== 1.0) {
+        for (const seasonName of ['summer', 'winter']) {
+            const arr = result[`r_precip_${seasonName}`];
+            for (let r = 0; r < numRegions; r++) arr[r] *= precipScale;
+        }
+    }
 
     result._precipTiming = timing;
     return result;

@@ -56,6 +56,16 @@ After any code change that adds, removes, or modifies features, check whether th
 
 Files that rarely need updating: `robots.txt` (only if adding pages or restricting crawlers), `CNAME` (only if domain changes), `preview.png` (only if the app's visual appearance changes dramatically).
 
+After any code change that adds a planetary parameter that affects rendering, follow the **`color-map.js` module-level state pattern**. Planetary rendering context is stored as module-level variables (not function parameters) so the ~21 call sites in `color-map.js` pick it up automatically without threading. The pattern:
+
+1. Declare `let _myParam = defaultValue;` near the top of `color-map.js`
+2. Export `export function setMyParam(v) { _myParam = ...; }` immediately after
+3. Use `_myParam` inside any `color-map.js` function that needs it
+4. In `js/main.js`, import `setMyParam` and call it in the `generate-done` handler after `state.planetaryParams` is populated
+5. Ensure Earth defaults (`upliftMult=1`, `hasLiquidOcean=true`, etc.) preserve the original Earth output exactly
+
+Existing examples: `_upliftMult`/`setUpliftMult` (mountain height scaling) and `_hasLiquidOcean`/`setHasLiquidOcean` (dry-world terrain colors).
+
 After any code change that adds, removes, or modifies slider controls, update the planet code encoding in `js/planet-code.js` to match. The planet code packs the seed and all slider values into a compact base36 string using mixed-radix integer packing. If a slider's range, step, or count changes, or if a new slider is added, update:
 
 - The `SLIDERS` array (min, step, count for each slider)

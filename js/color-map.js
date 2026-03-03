@@ -1,13 +1,26 @@
 // Elevation → RGB colour mapping.
 
-// Convert raw mesh elevation (nonlinear, 0-~1 for land) to physical height
+// Uplift multiplier for the current planet (1.0 = Earth default = 6 km cap).
+// Higher values allow taller mountains on low-gravity worlds.
+// Call setUpliftMult() with params.upliftMultiplier after each generation.
+let _upliftMult = 1;
+export function setUpliftMult(m) { _upliftMult = m > 0 ? m : 1; }
+
+// Whether the current planet has a liquid ocean.
+// When false, elevationToColor uses a dry rocky basin ramp instead of ocean blue.
+let _hasLiquidOcean = true;
+export function setHasLiquidOcean(v) { _hasLiquidOcean = !!v; }
+
+// Convert raw mesh elevation (nonlinear, 0-~1 for land at 1g) to physical height
 // in kilometres.  Smooth power curve: ramps slowly through lowlands,
-// accelerates into highlands, caps at 6 km.
+// accelerates into highlands.  Scales with gravity — max is 6*upliftMult km.
 // Ocean (elev < 0) is mapped with a linear scale (~5 km at -0.5).
 export function elevToHeightKm(elev) {
     if (elev <= 0) return elev * 10;  // ocean: -0.5 → -5 km
-    const t = Math.min(elev, 1);
-    return 6 * t * t;  // 0→0, 0.25→0.375, 0.5→1.5, 0.75→3.375, 1.0→6
+    // Normalize by upliftMult so a 0.3g planet's peaks (~elev 3.3) map to ~20 km,
+    // not the 6 km cap that applies at Earth (1g, upliftMult=1).
+    const t = Math.min(elev / _upliftMult, 1);
+    return 6 * _upliftMult * t * t;
 }
 
 // Biome base colors indexed by Köppen class ID (satellite-view palette).
@@ -65,9 +78,11 @@ function altitudeThresholds(classId) {
     return [0, 0.5];                             // Ice cap (EF)
 }
 
-// Satellite-view biome color: realistic land colors based on Köppen class
-// and elevation, with ocean delegated to the standard ocean palette.
-export function biomeColor(koppenId, elevation) {
+// ---------------------------------------------------------------------------
+// Earth biome color (original satellite-view palette)
+// ---------------------------------------------------------------------------
+
+function earthBiomeColor(koppenId, elevation) {
     // Ocean
     if (koppenId === 0 || elevation <= 0) return elevationToColor(elevation);
 
@@ -112,10 +127,128 @@ export function biomeColor(koppenId, elevation) {
     return [r, g, b];
 }
 
+// ---------------------------------------------------------------------------
+// Alternate world-type palettes
+// ---------------------------------------------------------------------------
+
+/** Barren world (no atmosphere): greyscale rocky surface, no biome hues. */
+function barrenColor(elevation) {
+    if (elevation < -0.40) return [0.06, 0.05, 0.06];
+    if (elevation < -0.10) {
+        const t = (elevation + 0.40) / 0.30;
+        return [0.06 + t * 0.10, 0.05 + t * 0.10, 0.06 + t * 0.09];
+    }
+    if (elevation < 0.00) {
+        const t = (elevation + 0.10) / 0.10;
+        return [0.16 + t * 0.08, 0.15 + t * 0.07, 0.15 + t * 0.07];
+    }
+    // Land: ramp from dark grey to pale grey, slight warm dust tint in lowlands
+    const hKm = elevToHeightKm(elevation);
+    const base = 0.24 + Math.min(0.58, hKm / 6 * 0.58);
+    const warmth = Math.max(0, 0.025 - hKm * 0.006); // warm dust tint near ground
+    return [base + warmth, base - warmth * 0.3, base - warmth * 0.5];
+}
+
+/** Arid world (no hydrosphere): ochre/rust/sandstone — Mars-like dry surface. */
+function aridColor(koppenId, elevation) {
+    if (elevation <= 0) {
+        // Dried seabed: rust-brown, slightly distinguishable by depth
+        if (elevation < -0.40) return [0.30, 0.18, 0.10];
+        const t = (elevation + 0.40) / 0.40;
+        return [0.30 + t * 0.24, 0.18 + t * 0.18, 0.10 + t * 0.14];
+    }
+    const hKm = elevToHeightKm(elevation);
+    const t = Math.min(1, hKm / 5);
+    // Orange-ochre at low elevations, fading to pale rocky grey at peaks
+    const r = 0.74 - t * 0.18;
+    const g = 0.50 - t * 0.18;
+    const b = 0.22 + t * 0.14;
+    // Subtle biome variation: tropical zones slightly more orange, polar zones grayer
+    const warmBias = koppenId <= 7 ? 0.05 : (koppenId >= 29 ? -0.06 : 0.00);
+    return [
+        Math.min(1, r + warmBias),
+        Math.min(1, g + warmBias * 0.4),
+        Math.max(0, b - warmBias * 0.3),
+    ];
+}
+
+/** Ice world (extreme cold): pale blue-white frozen surface. */
+function iceColor(koppenId, elevation) {
+    if (elevation <= 0) {
+        // Frozen ocean: dark blue-grey deep, pale blue-grey shallow
+        if (elevation < -0.40) return [0.28, 0.36, 0.52];
+        const t = (elevation + 0.40) / 0.40;
+        return [0.28 + t * 0.36, 0.36 + t * 0.30, 0.52 + t * 0.24];
+    }
+    const hKm = elevToHeightKm(elevation);
+    const t = Math.min(1, hKm / 5);
+    // Land: pale icy blue-white; brighter at altitude
+    const r = 0.68 + t * 0.22;
+    const g = 0.74 + t * 0.18;
+    const b = 0.82 + t * 0.12;
+    // Blend in a sliver of original biome tint at low elevations for variety
+    if (koppenId >= 1 && koppenId <= 30) {
+        const earth = BIOME_COLORS[koppenId];
+        const frost = 0.75 + t * 0.15; // 75-90% frosted
+        return [
+            r * frost + earth[0] * (1 - frost),
+            g * frost + earth[1] * (1 - frost),
+            b * frost + earth[2] * (1 - frost),
+        ];
+    }
+    return [r, g, b];
+}
+
+/** Alien world (Titan/Venus-like): amber-orange methane seas, rust highlands. */
+function alienColor(koppenId, elevation) {
+    if (elevation <= 0) {
+        // Exotic seas (methane/sulfuric): deep indigo to murky amber-brown
+        if (elevation < -0.40) return [0.10, 0.07, 0.20];
+        const t = (elevation + 0.40) / 0.40;
+        return [0.10 + t * 0.34, 0.07 + t * 0.22, 0.20 + t * 0.12];
+    }
+    const hKm = elevToHeightKm(elevation);
+    const t = Math.min(1, hKm / 5);
+    // Ground: amber-orange lowlands → rust-red mid → pale ochre peaks
+    const r = 0.62 + t * 0.18;
+    const g = 0.30 - t * 0.05;
+    const b = 0.06 + t * 0.18;
+    return [r, g, b];
+}
+
+// ---------------------------------------------------------------------------
+// Public: dispatch to correct palette by biome mode
+// ---------------------------------------------------------------------------
+
+/**
+ * Satellite-view biome color, supporting alternate world palettes.
+ * @param {number}  koppenId  Köppen class ID (0 = ocean)
+ * @param {number}  elevation Normalised elevation (-1…1)
+ * @param {string}  biomeMode 'earth' | 'arid' | 'ice' | 'alien' | 'barren'
+ */
+export function biomeColor(koppenId, elevation, biomeMode = 'earth') {
+    switch (biomeMode) {
+        case 'barren': return barrenColor(elevation);
+        case 'arid':   return aridColor(koppenId, elevation);
+        case 'ice':    return iceColor(koppenId, elevation);
+        case 'alien':  return alienColor(koppenId, elevation);
+        default:       return earthBiomeColor(koppenId, elevation); // 'earth'
+    }
+}
+
 export function elevationToColor(e) {
+    if (!_hasLiquidOcean) {
+        // Dry world: no ocean blue — render as rocky basin / arid lowland.
+        // Deep basin: dark charcoal-brown. Rises to sandy-tan at ground level.
+        if (e < -0.50) return [0.13, 0.10, 0.09];
+        if (e < -0.10) { const t=(e+0.50)/0.40; return [0.13+t*0.14, 0.10+t*0.12, 0.09+t*0.10]; }
+        if (e <  0.00) { const t=(e+0.10)/0.10; return [0.27+t*0.20, 0.22+t*0.18, 0.19+t*0.14]; }
+    }
+    // Standard ocean ramp (Earth / wet worlds)
     if (e < -0.50) return [0.04, 0.06, 0.30];
     if (e < -0.10) { const t=(e+0.50)/0.40; return [0.04+t*0.07,0.06+t*0.14,0.30+t*0.18]; }
     if (e <  0.00) { const t=(e+0.10)/0.10; return [0.11+t*0.19,0.20+t*0.22,0.48+t*0.12]; }
+    // Land ramp — same for all world types in Terrain view (shows elevation relief)
     if (e <  0.03) { const t=e/0.03;         return [0.72+t*0.08,0.68-t*0.02,0.46-t*0.10]; }
     if (e <  0.25) { const t=(e-0.03)/0.22;  return [0.20-t*0.06,0.54-t*0.12,0.12+t*0.08]; }
     if (e <  0.50) { const t=(e-0.25)/0.25;  return [0.14+t*0.30,0.42-t*0.14,0.20-t*0.06]; }

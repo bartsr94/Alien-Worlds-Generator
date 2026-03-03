@@ -1,6 +1,6 @@
 # World Orogen
 
-A browser-based procedural planet generator that creates realistic terrestrial planets with tectonic plate simulation, elevation modeling, and interactive editing. Uses native ES modules with no build step required.
+A browser-based procedural planet generator that creates terrestrial and alien worlds with tectonic plate simulation, elevation modeling, and interactive editing. Nine world presets (Mars-like, Venus-like, Titan-like, Dead Rock, Ocean World, Ice Ball, Arid Desert, High Gravity, Random Alien) plus five Planetary Physics sliders produce genuinely alien environments. Uses native ES modules with no build step required.
 
 [![Live Site](https://img.shields.io/badge/Try_it-orogen.studio-brightgreen)](https://orogen.studio/) ![Three.js](https://img.shields.io/badge/Three.js-0.160.0-blue) ![No Build](https://img.shields.io/badge/build-none-green)
 
@@ -15,6 +15,7 @@ All three are considered together; ties are broken in the order above.
 ## Features
 
 - **Fibonacci sphere meshing** with Voronoi cell tessellation via Delaunay triangulation
+- **Planetary Physics layer** — five sliders (gravity, atmosphere, hydrosphere, base temperature, axial tilt) flow through the entire simulation pipeline. Nine world presets (Mars-like, Venus-like, Titan-like, Dead Rock, Ocean World, Ice Ball, Arid Desert, High Gravity, and Random Alien) plus a Custom mode let you produce genuinely alien worlds: rust deserts, crushing hellscapes, methane-sea archipelagos, airless wastelands, and high-gravity super-Earths. Atmosphere rim glow, water sphere visibility, biome colors, and all simulation parameters adapt to the chosen planetary configuration. Earth defaults remain identical to the original generator.
 - **Tectonic plate simulation** — farthest-point seed placement with top-3 jitter, round-robin flood fill with directional growth bias, growth-rate governor, compactness penalty to prevent spindly shapes, multi-pass boundary smoothing, and fragment reconnection
 - **Ocean/land assignment** — farthest-point continent seeding, round-robin growth with separation guarantees, trapped sea absorption, targeting ~30% land coverage
 - **Collision detection** — convergent, divergent, and transform boundary classification with density-based subduction modeling
@@ -32,7 +33,7 @@ All three are considered together; ties are broken in the order above.
 - **Precipitation** — blended dual-model approach: a complex moisture advection simulation is combined 50-50 with a fast heuristic zonal model. The advection model simulates wind-driven moisture transport from coasts with six mechanisms: ITCZ convective uplift, frontal convergence, orographic rain/shadow, lee cyclogenesis, polar-front precipitation, and subtropical high suppression. The heuristic model provides smooth latitude-based patterns (ITCZ wet belt, subtropical dry belt, mid-latitude recovery, polar dryness) modulated by continentality and orographic effects. Blending the two reduces splotchiness while preserving terrain-informed detail and strengthening subtropical desert formation (~20–35°). Visualized on a brown (dry) → green (moderate) → blue (wet) color ramp. Computed for both summer and winter seasons.
 - **Map type switcher** — first-class Terrain / Satellite / Climate / Heightmap tabs with color legends for each view
 - **On-demand climate** — optional deferred climate computation; skip climate during generation for faster terrain iteration, compute it on demand when needed
-- **Detailed visualization** — twenty-six selectable inspection layers organized by category (Geology, Atmosphere, Ocean, Climate, Elevation) for viewing each component in isolation. Wind/pressure layers show directional wind arrows, ocean current layers show current arrows colored by heat transport, on both globe and map views. Precipitation layers use a brown→green→blue ramp showing dry to wet regions.
+- **Detailed visualization** — twenty-eight selectable inspection layers organized by category (Geology, Atmosphere, Ocean, Climate, Planetary, Elevation) for viewing each component in isolation. Wind/pressure layers show directional wind arrows, ocean current layers show current arrows colored by heat transport, on both globe and map views. Precipitation layers use a brown→green→blue ramp showing dry to wet regions.
 - **Map export** — download high-resolution equirectangular PNGs (color terrain, satellite biome, climate/Köppen, B&W heightmap, land-only heightmap, or B&W land mask) at configurable widths up to 65536px with tiled rendering. **Export All** downloads Satellite, Climate, Heightmap, and Land Mask in one click, auto-computing climate if needed.
 
 ## Quick Start
@@ -63,6 +64,23 @@ Every generated planet produces a **planet code** (shown below the Build button)
 - **URL sharing** — the code is also stored in the URL hash (e.g. `#a7f3kq9xp2b`), so you can share the full URL directly. Opening a URL with a valid hash auto-loads that planet, including any plate edits.
 
 ## Controls
+
+### Planetary Physics
+
+Physical properties of the planet (collapsed by default). Changing any of these requires a full rebuild. Earth defaults (`gravity=1.0g, atmosphere=Moderate, hydrosphere=Moderate, temp=+15°C, tilt=23°`) produce output identical to the original Earth-centric generator.
+
+A **World Preset** dropdown at the top of this section sets all five sliders at once. After selecting a preset, individual sliders can be adjusted — the dropdown shows "Custom" when sliders no longer match any preset.
+
+| Control | Range / Options | Default | Effect |
+|---------|-----------------|---------|--------|
+| World Preset | Earth-like, Arid Desert, Mars-like, Venus-like, Ocean World, High Gravity, Ice Ball, Titan-like, Dead Rock, Random Alien | Earth-like | Populates all five planetary sliders for the chosen world type |
+| Gravity | 0.1g – 3.0g | 1.0g | Scales maximum mountain height (`8.8 km / g`), tectonic uplift (`1/g` multiplier), and erosion intensity (`√g`). Low gravity → dramatic tall terrain; high gravity → compressed, squat landscape |
+| Atmosphere | None (0) → Trace → Thin → Moderate → Thick → Crushing (5) | Moderate (3) | Controls wind simulation (None = no wind, Crushing = slow heavy winds), precipitation (None = zero rainfall, higher = amplified), and the globe's atmosphere rim glow color |
+| Hydrosphere | None (0) → Trace → Partial → Moderate → High → Flooded (5) | Moderate (3) | Sets target ocean coverage (`~0%` at None to `~90%` at Flooded), scales hydraulic and glacial erosion, hides the water sphere when None, and determines whether fluid seas exist for ocean current simulation |
+| Base Temp | −150°C – +500°C | +15°C | Anchors all temperature simulation — the equatorial peak, pole temperature, ice coverage, and biome colors all shift relative to this value |
+| Axial Tilt | 0° – 90° | 23° | Scales seasonal amplitude and ITCZ migration range. 0° = no seasons; high values produce extreme polar heating in summer and expanded monsoon patterns |
+
+A constraint warning strip appears below the sliders when implausible combinations are chosen (e.g. no atmosphere with a liquid ocean, thick atmosphere on a very low-gravity world).
 
 ### Shape Your World
 
@@ -99,7 +117,7 @@ Climate simulation (wind, ocean currents, precipitation, temperature, Köppen cl
   - **Terrain** — elevation color ramp from deep ocean through sea level to mountain peaks
   - **Satellite** — realistic biome colors based on Köppen climate classification and elevation (lush green rainforests, tan deserts, white ice caps, dark taiga, gray tundra), with ocean using the standard terrain palette. High elevations blend toward snow white based on climate-aware snow lines.
   - **Climate** — Köppen-Geiger classification with color swatches for all 30 climate types
-  - **Heightmap** — black-to-white gradient on a fixed absolute scale (-5 km ocean floor to 6 km peaks), so the same physical height always maps to the same shade
+  - **Heightmap** — black-to-white gradient on an absolute scale (-5 km ocean floor to peak elevation), so the same physical height always maps to the same shade. The peak end of the scale adapts to the planet's gravity — roughly 6 km on an Earth-like world, higher on low-gravity planets.
 - **View** dropdown — switch between Globe and Map (equirectangular projection)
 - **Center Longitude** slider (map mode only) — shifts the map projection's central meridian to any longitude from 180°W to 180°E, scrolling the equirectangular projection so the chosen longitude is centered. Exports are unaffected (always centered on 0°).
 - **Wireframe** — toggle switch to show Voronoi cell edges as a wireframe overlay
@@ -117,13 +135,14 @@ The **Inspect** dropdown (in Visual Options, below the map tabs) selects a detai
 - **Atmosphere** — Pressure Summer/Winter (blue = low, red = high), Wind Speed Summer/Winter (with directional arrows on both globe and map)
 - **Ocean** — Currents Summer/Winter (red = warm poleward, blue = cold equatorward, black = zonal; with directional current arrows)
 - **Climate** — Precipitation Summer/Winter (brown = dry, green = moderate, blue = wet), Rain Shadow Summer/Winter (diverging blue = windward orographic boost, gray = neutral, red-brown = leeward rain shadow; leeward effects are seeded at downslope faces scaled by mountain height, then propagated ~1500 km downwind to show extended shadow zones like the foehn drying effect), Temperature Summer/Winter (purple-blue = cold, white = 0 C, green-yellow = warm, red = hot; fixed -45 to +45 C range), Continentality (blue = ocean, green = coast, yellow = moderate interior, orange/red = deep continental interior)
+- **Planetary** — Hydrosphere State (blue = liquid ocean, white = frozen, tan = dry basin, grey = land; reflects the planet's `Hydrosphere` and `Base Temp` settings), Habitability Index (red = inhospitable, yellow = marginal, green = habitable; composite of liquid water presence, temperature in −20 to +60 °C, and precipitation)
 - **Elevation** — Full Heightmap (full-range B&W)
 
 ### Export
 
 Click **Export Map** (below Visual Options) to open the export modal:
 
-- **Type** — Color Map (terrain colors), Satellite (biome colors from Köppen classification), Climate (Köppen classification colors), Heightmap (B&W full range on fixed -5 to 6 km absolute scale), Land Heightmap (B&W on fixed 0 to 6 km absolute scale, ocean is black), or Land Mask (pure B&W — white = land, black = ocean). Satellite and Climate options are disabled when climate hasn't been computed.
+- **Type** — Color Map (terrain colors), Satellite (biome colors from Köppen classification), Climate (Köppen classification colors), Heightmap (B&W on absolute scale from -5 km ocean floor to the planet's peak elevation), Land Heightmap (B&W from sea level to peak elevation, ocean is black), or Land Mask (pure B&W — white = land, black = ocean). Satellite and Climate options are disabled when climate hasn't been computed.
 - **Width** slider — 1024 to 65536 pixels (height is always width/2 for equirectangular). Large exports use tiled rendering to handle GPU texture limits.
 - **Export** — downloads the selected type as an equirectangular PNG with no grid overlay
 - **Export All** — downloads four maps (Satellite, Climate, Land Heightmap, Land Mask) sequentially. If climate hasn't been computed yet, it runs automatically before exporting.
@@ -213,6 +232,7 @@ js/
   generate.js           Worker dispatcher — posts jobs, handles results
   planet-worker.js      Web Worker — runs geology pipeline off main thread
   planet-code.js        Planet code encode/decode (seed + sliders → base36)
+  planetary-params.js   Planetary Physics parameter builder — derives all simulation constants from the five physics sliders
   rng.js                Seeded PRNG (Park-Miller LCG)
   simplex-noise.js      3D Simplex noise with fBm and ridged fBm
   color-map.js          Elevation → RGB colour mapping + satellite biome colors

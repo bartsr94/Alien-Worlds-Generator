@@ -88,6 +88,17 @@ const atmosMat = new THREE.ShaderMaterial({
 export const atmosMesh = new THREE.Mesh(new THREE.SphereGeometry(1.12,64,64), atmosMat);
 scene.add(atmosMesh);
 
+/** Update the atmosphere rim glow color and visibility.
+ *  @param {number[]} rgb  [r, g, b] in 0–1; pass null or [0,0,0] to hide. */
+export function updateAtmosphereColor(rgb) {
+    if (!rgb || (rgb[0] === 0 && rgb[1] === 0 && rgb[2] === 0)) {
+        atmosMesh.visible = false;
+    } else {
+        atmosMesh.visible = true;
+        atmosMat.uniforms.c.value.setRGB(rgb[0], rgb[1], rgb[2]);
+    }
+}
+
 // Water sphere
 const waterMat = new THREE.MeshPhongMaterial({
     color:0x0c3a6e, transparent:true, opacity:0.55,
@@ -95,6 +106,17 @@ const waterMat = new THREE.MeshPhongMaterial({
 });
 export const waterMesh = new THREE.Mesh(new THREE.SphereGeometry(1.0,80,80), waterMat);
 scene.add(waterMesh);
+
+/** Update the water sphere color and visibility.
+ *  @param {number[]|null} rgb  [r, g, b] in 0–1; pass null to hide. */
+export function updateWaterColor(rgb) {
+    if (!rgb) {
+        waterMesh.visible = false;
+    } else {
+        waterMesh.visible = true;
+        waterMat.color.setRGB(rgb[0], rgb[1], rgb[2]);
+    }
+}
 
 // Equirectangular map camera & controls
 export const mapCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);

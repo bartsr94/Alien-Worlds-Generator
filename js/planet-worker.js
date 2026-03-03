@@ -13,6 +13,7 @@ import { computeOceanCurrents } from './ocean.js';
 import { computePrecipitation } from './precipitation.js';
 import { computeTemperature } from './temperature.js';
 import { classifyKoppen } from './koppen.js';
+import { buildPlanetaryParams } from './planetary-params.js';
 import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
 
 setDelaunator(Delaunator);
@@ -36,9 +37,15 @@ function computeTriangleElevations(mesh, r_elevation) {
 }
 
 // Run terrain post-processing with per-step timing
-function runPostProcessing(mesh, r_xyz, r_elevation, params, neighborDist, seed) {
+function runPostProcessing(mesh, r_xyz, r_elevation, params, neighborDist, seed, planetaryParams) {
     const { smoothing, glacialErosion, hydraulicErosion, thermalErosion, ridgeSharpening, terrainWarp } = params;
     const timing = [];
+
+    // Planetary physics scales (default to Earth values = 1.0 for no change)
+    const hydroScale    = planetaryParams?.hydraulicErosionScale ?? 1.0;
+    const glacialScale  = planetaryParams?.glacialErosionScale   ?? 1.0;
+    // Higher gravity → more erosion (erosionIntensity = sqrt(g), 1.0 at Earth)
+    const thermalScale  = planetaryParams?.erosionIntensity      ?? 1.0;
 
     // Terrain warp — first step, before ocean detection or smoothing
     if (terrainWarp > 0) {
@@ -63,12 +70,12 @@ function runPostProcessing(mesh, r_xyz, r_elevation, params, neighborDist, seed)
     }
 
     if (glacialErosion > 0 || hydraulicErosion > 0 || thermalErosion > 0) {
-        const gIters = Math.round(glacialErosion * 10);
-        const hIters = Math.round(hydraulicErosion * 20);
+        const gIters = Math.round(glacialErosion  * 10 * glacialScale);
+        const hIters = Math.round(hydraulicErosion * 20 * hydroScale);
         const hK = hydraulicErosion * 0.001;
-        const tIters = Math.round(thermalErosion * 10);
+        const tIters = Math.round(thermalErosion * 10 * thermalScale);
         const talusSlope = 1.2 - thermalErosion * 0.4;
-        const kThermal = thermalErosion * 0.15;
+        const kThermal = thermalErosion * 0.15 * thermalScale;
         const t0 = performance.now();
         erodeComposite(mesh, r_elevation, r_xyz, r_isOcean,
             hIters, hK, 0.5, 1.0,
@@ -105,6 +112,15 @@ function handleGenerate(data) {
     const spread = 5;
     const timing = []; // top-level pipeline timing
 
+    // Build planetary physics params from slider values (or Earth defaults).
+    const planetaryParams = buildPlanetaryParams({
+        gravity:     data.gravity     ?? 1.0,
+        atmosphere:  data.atmosphere  ?? 3,
+        hydrosphere: data.hydrosphere ?? 3,
+        baseTemp:    data.baseTemp    ?? 15,
+        axialTilt:   data.axialTilt   ?? 23.5,
+    });
+
     try {
         const tTotal0 = performance.now();
 
@@ -127,7 +143,7 @@ function handleGenerate(data) {
         progress(10, 'Generating coarse plates\u2026');
         t0 = performance.now();
         const { coarseMesh, coarse_xyz, coarse_r_plate, coarsePlateSeeds, coarsePlateVec, coarsePlateIsOcean } =
-            generateCoarsePlates(seed, P, numContinents);
+            generateCoarsePlates(seed, P, numContinents, planetaryParams.oceanFraction);
         timing.push({ stage: `Coarse plates (${P} plates, ${numContinents} continents)`, ms: performance.now() - t0 });
 
         progress(20, 'Projecting plates\u2026');
@@ -172,14 +188,14 @@ function handleGenerate(data) {
         progress(35, 'Raising mountains\u2026');
         t0 = performance.now();
         const { r_elevation, mountain_r, coastline_r, ocean_r, r_stress, debugLayers, _timing } =
-            assignElevation(mesh, r_xyz, plateIsOcean, r_plate, plateVec, plateSeeds, noise, nMag, seed, spread, plateDensity);
+            assignElevation(mesh, r_xyz, plateIsOcean, r_plate, plateVec, plateSeeds, noise, nMag, seed, spread, plateDensity, planetaryParams);
         timing.push({ stage: 'Elevation (collisions + stress + distance fields + assignment)', ms: performance.now() - t0 });
 
         const prePostElev = new Float32Array(r_elevation);
 
         progress(60, 'Eroding terrain\u2026');
         t0 = performance.now();
-        const { dl_erosionDelta, postTiming } = runPostProcessing(mesh, r_xyz, r_elevation, { smoothing, glacialErosion, hydraulicErosion, thermalErosion, ridgeSharpening, terrainWarp }, neighborDist, seed);
+        const { dl_erosionDelta, postTiming } = runPostProcessing(mesh, r_xyz, r_elevation, { smoothing, glacialErosion, hydraulicErosion, thermalErosion, ridgeSharpening, terrainWarp }, neighborDist, seed, planetaryParams);
         timing.push({ stage: 'Terrain post-processing (total)', ms: performance.now() - t0 });
         debugLayers.erosionDelta = dl_erosionDelta;
 
@@ -188,7 +204,7 @@ function handleGenerate(data) {
         if (!skipClimate) {
             progress(70, 'Simulating wind patterns\u2026');
             t0 = performance.now();
-            windResult = computeWind(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, noise);
+            windResult = computeWind(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, noise, planetaryParams.axialTilt, planetaryParams);
             timing.push({ stage: 'Wind simulation', ms: performance.now() - t0 });
             if (windResult._windTiming) timing.push(...windResult._windTiming);
             debugLayers.pressureSummer = windResult.r_pressure_summer;
@@ -199,13 +215,13 @@ function handleGenerate(data) {
 
             progress(78, 'Computing ocean currents\u2026');
             t0 = performance.now();
-            oceanResult = computeOceanCurrents(mesh, r_xyz, r_elevation, windResult);
+            oceanResult = computeOceanCurrents(mesh, r_xyz, r_elevation, windResult, planetaryParams);
             timing.push({ stage: 'Ocean currents', ms: performance.now() - t0 });
             if (oceanResult._oceanTiming) timing.push(...oceanResult._oceanTiming);
 
             progress(82, 'Computing precipitation\u2026');
             t0 = performance.now();
-            precipResult = computePrecipitation(mesh, r_xyz, r_elevation, windResult, oceanResult);
+            precipResult = computePrecipitation(mesh, r_xyz, r_elevation, windResult, oceanResult, planetaryParams);
             timing.push({ stage: 'Precipitation', ms: performance.now() - t0 });
             if (precipResult._precipTiming) timing.push(...precipResult._precipTiming);
             debugLayers.precipSummer = precipResult.r_precip_summer;
@@ -215,7 +231,7 @@ function handleGenerate(data) {
 
             progress(86, 'Computing temperature\u2026');
             t0 = performance.now();
-            tempResult = computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanResult, precipResult);
+            tempResult = computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanResult, precipResult, planetaryParams);
             timing.push({ stage: 'Temperature', ms: performance.now() - t0 });
             if (tempResult._tempTiming) timing.push(...tempResult._tempTiming);
             debugLayers.tempSummer = tempResult.r_temperature_summer;
@@ -245,7 +261,8 @@ function handleGenerate(data) {
             r_elevation_final: new Float32Array(r_elevation),
             seed, nMag, noise,
             mountain_r: new Set(mountain_r), coastline_r: new Set(coastline_r), ocean_r: new Set(ocean_r),
-            r_stress: new Float32Array(r_stress)
+            r_stress: new Float32Array(r_stress),
+            planetaryParams,
         };
         timing.push({ stage: 'Clone state for retention', ms: performance.now() - t0 });
 
@@ -329,7 +346,7 @@ function handleReapply(data) {
 
         progress(20, 'Eroding terrain\u2026');
         t0 = performance.now();
-        const { dl_erosionDelta, postTiming } = runPostProcessing(W.mesh, W.r_xyz, r_elevation, data, W.neighborDist, W.seed);
+        const { dl_erosionDelta, postTiming } = runPostProcessing(W.mesh, W.r_xyz, r_elevation, data, W.neighborDist, W.seed, W.planetaryParams);
         const tPost = performance.now() - t0;
 
         // Update retained final elevation for deferred climate
@@ -341,22 +358,22 @@ function handleReapply(data) {
         if (!skipClimate) {
             progress(60, 'Simulating wind patterns\u2026');
             t0 = performance.now();
-            windResult = computeWind(W.mesh, W.r_xyz, r_elevation, W.plateIsOcean, W.r_plate, W.noise);
+            windResult = computeWind(W.mesh, W.r_xyz, r_elevation, W.plateIsOcean, W.r_plate, W.noise, W.planetaryParams.axialTilt, W.planetaryParams);
             tWind = performance.now() - t0;
 
             progress(75, 'Computing ocean currents\u2026');
             t0 = performance.now();
-            oceanResult = computeOceanCurrents(W.mesh, W.r_xyz, r_elevation, windResult);
+            oceanResult = computeOceanCurrents(W.mesh, W.r_xyz, r_elevation, windResult, W.planetaryParams);
             tOcean = performance.now() - t0;
 
             progress(80, 'Computing precipitation\u2026');
             t0 = performance.now();
-            precipResult = computePrecipitation(W.mesh, W.r_xyz, r_elevation, windResult, oceanResult);
+            precipResult = computePrecipitation(W.mesh, W.r_xyz, r_elevation, windResult, oceanResult, W.planetaryParams);
             tPrecip = performance.now() - t0;
 
             progress(85, 'Computing temperature\u2026');
             t0 = performance.now();
-            tempResult = computeTemperature(W.mesh, W.r_xyz, r_elevation, windResult, oceanResult, precipResult);
+            tempResult = computeTemperature(W.mesh, W.r_xyz, r_elevation, windResult, oceanResult, precipResult, W.planetaryParams);
             tTemp = performance.now() - t0;
         }
 
@@ -452,7 +469,7 @@ function handleEditRecompute(data) {
 
         progress(50, 'Eroding terrain\u2026');
         t0 = performance.now();
-        const { dl_erosionDelta, postTiming } = runPostProcessing(mesh, r_xyz, r_elevation, data, W.neighborDist, W.seed);
+        const { dl_erosionDelta, postTiming } = runPostProcessing(mesh, r_xyz, r_elevation, data, W.neighborDist, W.seed, W.planetaryParams);
         const tPost = performance.now() - t0;
         debugLayers.erosionDelta = dl_erosionDelta;
 
@@ -465,7 +482,7 @@ function handleEditRecompute(data) {
         if (!skipClimate) {
             progress(65, 'Simulating wind patterns\u2026');
             t0 = performance.now();
-            windResult = computeWind(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, W.noise);
+            windResult = computeWind(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, W.noise, W.planetaryParams.axialTilt, W.planetaryParams);
             tWind = performance.now() - t0;
             debugLayers.pressureSummer = windResult.r_pressure_summer;
             debugLayers.pressureWinter = windResult.r_pressure_winter;
@@ -475,12 +492,12 @@ function handleEditRecompute(data) {
 
             progress(78, 'Computing ocean currents\u2026');
             t0 = performance.now();
-            oceanResult = computeOceanCurrents(mesh, r_xyz, r_elevation, windResult);
+            oceanResult = computeOceanCurrents(mesh, r_xyz, r_elevation, windResult, W.planetaryParams);
             tOcean = performance.now() - t0;
 
             progress(82, 'Computing precipitation\u2026');
             t0 = performance.now();
-            precipResult = computePrecipitation(mesh, r_xyz, r_elevation, windResult, oceanResult);
+            precipResult = computePrecipitation(mesh, r_xyz, r_elevation, windResult, oceanResult, W.planetaryParams);
             tPrecip = performance.now() - t0;
             debugLayers.precipSummer = precipResult.r_precip_summer;
             debugLayers.precipWinter = precipResult.r_precip_winter;
@@ -489,7 +506,7 @@ function handleEditRecompute(data) {
 
             progress(86, 'Computing temperature\u2026');
             t0 = performance.now();
-            tempResult = computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanResult, precipResult);
+            tempResult = computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanResult, precipResult, W.planetaryParams);
             tTemp = performance.now() - t0;
             debugLayers.tempSummer = tempResult.r_temperature_summer;
             debugLayers.tempWinter = tempResult.r_temperature_winter;
@@ -572,26 +589,26 @@ function handleComputeClimate() {
 
     try {
         const tTotal0 = performance.now();
-        const { mesh, r_xyz, r_elevation_final, plateIsOcean, r_plate, noise } = W;
+        const { mesh, r_xyz, r_elevation_final, plateIsOcean, r_plate, noise, planetaryParams } = W;
 
         progress(0, 'Simulating wind patterns\u2026');
         let t0 = performance.now();
-        const windResult = computeWind(mesh, r_xyz, r_elevation_final, plateIsOcean, r_plate, noise);
+        const windResult = computeWind(mesh, r_xyz, r_elevation_final, plateIsOcean, r_plate, noise, planetaryParams.axialTilt, planetaryParams);
         const tWind = performance.now() - t0;
 
         progress(30, 'Computing ocean currents\u2026');
         t0 = performance.now();
-        const oceanResult = computeOceanCurrents(mesh, r_xyz, r_elevation_final, windResult);
+        const oceanResult = computeOceanCurrents(mesh, r_xyz, r_elevation_final, windResult, planetaryParams);
         const tOcean = performance.now() - t0;
 
         progress(50, 'Computing precipitation\u2026');
         t0 = performance.now();
-        const precipResult = computePrecipitation(mesh, r_xyz, r_elevation_final, windResult, oceanResult);
+        const precipResult = computePrecipitation(mesh, r_xyz, r_elevation_final, windResult, oceanResult, planetaryParams);
         const tPrecip = performance.now() - t0;
 
         progress(70, 'Computing temperature\u2026');
         t0 = performance.now();
-        const tempResult = computeTemperature(mesh, r_xyz, r_elevation_final, windResult, oceanResult, precipResult);
+        const tempResult = computeTemperature(mesh, r_xyz, r_elevation_final, windResult, oceanResult, precipResult, planetaryParams);
         const tTemp = performance.now() - t0;
 
         progress(88, 'Classifying climates\u2026');
