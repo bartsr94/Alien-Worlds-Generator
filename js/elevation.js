@@ -238,6 +238,15 @@ export function assignElevation(mesh, r_xyz, plateIsOcean, r_plate, plateVec, pl
 
     // Propagate stress inward
     const scaleFactor = Math.sqrt(numRegions / 10000);
+    // Dry-world flag: suppress ocean floor relief features (ridges, trenches, fractures, islands)
+    const hasOcean = !params || params.hasLiquidOcean !== false;
+    // Margin-aware shelf/slope hop-count breakpoints (physical width, not depth).
+    // Active margins = narrow shelf; passive margins = wide continental shelf.
+    // Depths are identical for both — only WIDTH differs, avoiding the false-land problem.
+    const activeShelf  = Math.max(2, Math.round(3  * scaleFactor));
+    const activeSlope  = Math.max(5, Math.round(8  * scaleFactor));
+    const passiveShelf = Math.max(4, Math.round(7  * scaleFactor));
+    const passiveSlope = Math.max(10, Math.round(16 * scaleFactor));
     const baseDecay = 0.5 + spread * 0.04;
     const decayFactor = Math.pow(baseDecay, 1 / scaleFactor);
     const subductBaseDecay = baseDecay * 0.45;
@@ -750,13 +759,17 @@ export function assignElevation(mesh, r_xyz, plateIsOcean, r_plate, plateVec, pl
 
         } else {
             const dc = dist_coast[r];
-            // Ocean floor profile: deeper than original to survive coastal roughening.
-            // Fixed breakpoints (5/12) — margin differentiation handled by coastal roughening character.
+            // Ocean floor profile: scaled, margin-aware shelf width.
+            // Active margins (convergent coast) → narrow shelf; passive → wide shelf.
+            // Depth endpoints are identical for both margin types — width is the differentiator.
+            const isActiveMgn = coastConvergent[r] === 1;
+            const shelfBreak  = isActiveMgn ? activeShelf  : passiveShelf;
+            const slopeEnd    = isActiveMgn ? activeSlope  : passiveSlope;
             let oceanBase;
-            if (dc < 5) {
-                oceanBase = -0.04 - 0.06 * (dc / 5);
-            } else if (dc < 12) {
-                oceanBase = -0.10 - 0.25 * ((dc - 5) / 7);
+            if (dc < shelfBreak) {
+                oceanBase = -0.04 - 0.06 * (dc / shelfBreak);
+            } else if (dc < slopeEnd) {
+                oceanBase = -0.10 - 0.25 * ((dc - shelfBreak) / Math.max(1, slopeEnd - shelfBreak));
             } else {
                 oceanBase = -0.35 + noise.fbm(x * 2, y * 2, z * 2, 3) * 0.03;
             }
@@ -775,7 +788,7 @@ export function assignElevation(mesh, r_xyz, plateIsOcean, r_plate, plateVec, pl
 
             // Mid-ocean ridge: wider feature with quadratic falloff from divergent boundary
             const rd = ridgeDist[r];
-            if (rd !== Infinity && rd <= ridgeHalfWidth) {
+            if (hasOcean && rd !== Infinity && rd <= ridgeHalfWidth) {
                 const t = rd / ridgeHalfWidth;
                 const ridgeFade = (1 - t) * (1 - t);
                 const ridgeNoise = noise.ridgedFbm(x * 3, y * 3, z * 3, 4);
@@ -785,19 +798,19 @@ export function assignElevation(mesh, r_xyz, plateIsOcean, r_plate, plateVec, pl
 
             // Oceanic fracture zones: linear depressions at transform boundaries
             const fd = fractureDist[r];
-            if (fd !== Infinity && fd <= fractureHalfWidth) {
+            if (hasOcean && fd !== Infinity && fd <= fractureHalfWidth) {
                 const ft = fd / fractureHalfWidth;
                 const fractureFade = 1 - ft;
                 r_elevation[r] -= 0.03 * fractureFade;
             }
 
             // Trenches at convergent boundaries
-            if (btype === 1) {
+            if (hasOcean && btype === 1) {
                 r_elevation[r] -= 0.15 + 0.15 * stressNorm;
             }
 
             // Back-arc basin: deepen ocean floor behind subduction zones
-            {
+            if (hasOcean) {
                 const bad = backArcDist[r];
                 if (bad !== Infinity && bad >= baStart) {
                     const dMtn = dist_mountain[r];
@@ -885,15 +898,21 @@ export function assignElevation(mesh, r_xyz, plateIsOcean, r_plate, plateVec, pl
                 r_elevation[r] += warpDelta;
             }
 
-            // Layer 2: Island scattering (original behavior — kept conservative to avoid false land)
-            if (r_isOcean[r] && dBdry[r] > 0
-                && dBdry[r] <= Math.max(4, Math.round(4 * scaleFactor))
+            // Layer 2: Island scattering
+            // Passive: wider range + lower threshold → barrier islands, offshore archipelagos
+            // Active: narrower range + higher threshold → fewer islands near rugged coast
+            const islandRange = isPassiveCoast
+                ? Math.max(4, Math.round(6 * scaleFactor))
+                : Math.max(3, Math.round(3 * scaleFactor));
+            const islandThreshold = isPassiveCoast ? 0.20 : 0.30;
+            if (hasOcean && r_isOcean[r] && dBdry[r] > 0
+                && dBdry[r] <= islandRange
                 && subSup < 0.3) {
                 const islandN = cNoise2.fbm(x * 35 + 5.1, y * 35 + 9.3, z * 35 + 2.7, 4, 0.5);
-                const threshold = 0.25 - sn * 0.2;
+                const threshold = islandThreshold - sn * 0.2;
                 if (islandN > threshold) {
                     const excess = (islandN - threshold) / (1 - threshold);
-                    const distFade = 1 - (dBdry[r] / Math.max(4, Math.round(4 * scaleFactor)));
+                    const distFade = 1 - (dBdry[r] / islandRange);
                     let bump = excess * excess * 0.18 * (1 + sn * 2) * distFade;
                     bump *= (1 - subSup / 0.3);
                     r_elevation[r] += bump;
@@ -906,8 +925,8 @@ export function assignElevation(mesh, r_xyz, plateIsOcean, r_plate, plateVec, pl
 
     _timing.push({ stage: 'Coastal roughening', ms: performance.now() - _t0 }); _t0 = performance.now();
 
-    // Island arcs — ocean-ocean convergent boundary uplift
-    {
+    // Island arcs — ocean-ocean convergent boundary uplift (suppressed on dry worlds)
+    if (hasOcean) {
         const arcNoise = new SimplexNoise(seed + 307);
         const maxArcDist = Math.max(5, Math.round(5 * scaleFactor));
 
