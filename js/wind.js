@@ -615,6 +615,69 @@ export function computeWind(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, noi
         return zeroResult;
     }
 
+    // ── Crushing atmosphere (atm=5): near-uniform retrograde wind override ──
+    // Venus-like worlds develop super-rotating atmospheres that flow consistently
+    // from east to west regardless of season. The crushing atmosphere redistributes
+    // heat so efficiently that normal Coriolis circulation cells break down — no ITCZ
+    // migration, no Hadley/Ferrel/polar cells, just a steady slow westward flow.
+    if (params && params.atmosphere === 5) {
+        const t1 = performance.now();
+        const windMult = params.windIntensity ?? 0.40;
+
+        const r_windE     = new Float32Array(numRegions);
+        const r_windN     = new Float32Array(numRegions);
+        const r_windSpeed = new Float32Array(numRegions);
+        const r_pressureDev = new Float32Array(numRegions);
+
+        for (let r = 0; r < numRegions; r++) {
+            const latRad = r_lat[r]; // radians
+            const nx = r_xyz[3 * r], ny = r_xyz[3 * r + 1], nz = r_xyz[3 * r + 2];
+
+            // equatorial enhancement: super-rotation peaks at low latitudes
+            const normLat = Math.abs(latRad) / (Math.PI * 0.5); // 0 at equator, 1 at pole
+            const latFactor = 1.0 - 0.30 * Math.pow(normLat, 0.7);
+
+            // small noise perturbation for visual texture (±10% variation)
+            const noiseVal = noise(nx * 3.1, ny * 3.1, nz * 3.1) * 0.10;
+
+            // retrograde = westward = negative east component
+            r_windE[r] = (-0.75 * latFactor + noiseVal) * windMult;
+
+            // very slight poleward convergence — sluggish single-cell Hadley circulation
+            r_windN[r] = (-latRad * 0.08 + noise(nx * 1.7, ny * 1.7, nz * 1.7) * 0.04) * windMult;
+
+            // normalized wind speed (0–1) for visualization
+            const mag = Math.hypot(r_windE[r], r_windN[r]);
+            r_windSpeed[r] = Math.min(1, mag / (0.80 * windMult) * 0.7 + 0.15);
+
+            // near-uniform pressure — tiny deviations from sluggish meridional flow
+            r_pressureDev[r] = noiseVal * 3.0; // ≈ ±0.3 hPa
+        }
+
+        // Summer and winter are identical — a crushing atmosphere with minimal tilt
+        // has no meaningful seasonal variation in surface winds.
+        const ITCZ_SAMPLES = 360;
+        const itczLons        = new Float32Array(ITCZ_SAMPLES);
+        const itczLatsSummer  = new Float32Array(ITCZ_SAMPLES);
+        const itczLatsWinter  = new Float32Array(ITCZ_SAMPLES);
+        for (let i = 0; i < ITCZ_SAMPLES; i++) {
+            itczLons[i] = -Math.PI + (i + 0.5) * (2 * Math.PI / ITCZ_SAMPLES);
+            itczLatsSummer[i] = 0; // ITCZ locked at equator — no migration
+            itczLatsWinter[i] = 0;
+        }
+
+        return {
+            r_pressure_summer: r_pressureDev, r_pressure_winter: r_pressureDev,
+            r_wind_east_summer: r_windE,   r_wind_north_summer: r_windN,   r_wind_speed_summer: r_windSpeed,
+            r_wind_east_winter: r_windE,   r_wind_north_winter: r_windN,   r_wind_speed_winter: r_windSpeed,
+            itczLons, itczLatsSummer, itczLatsWinter,
+            r_lat, r_lon, r_sinLat, r_isLand,
+            r_continentality, r_coastDistLand: r_coastDist, r_plateContinentality,
+            r_eastX, r_eastY, r_eastZ, r_northX, r_northY, r_northZ,
+            _windTiming: [{ stage: 'Wind: retrograde super-rotation (crushing atmosphere)', ms: performance.now() - t1 }],
+        };
+    }
+
     // Shared gradient scratch arrays
     const r_gradE = new Float32Array(numRegions);
     const r_gradN = new Float32Array(numRegions);
