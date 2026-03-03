@@ -14,23 +14,24 @@ import { detailFromSlider, sliderFromDetail } from './detail-scale.js';
 import { KOPPEN_CLASSES } from './koppen.js';
 import { elevationToColor, setUpliftMult, setHasLiquidOcean,
          setBaseTemp, setAtmosphere, setHydrosphere } from './color-map.js';
+import { updateMoons } from './moons.js';
 import { buildPlanetaryParams, ATM_LABELS, HYDRO_LABELS } from './planetary-params.js';
 
 // World Preset definitions — { gravity, atm, hydro, baseTemp, tilt }
 const WORLD_PRESETS = {
-    earth:    { gravity: 1.0, atm: 3, hydro: 3, baseTemp:   15, tilt: 23 },
-    arid:     { gravity: 1.0, atm: 2, hydro: 1, baseTemp:   40, tilt: 25 },
-    mars:     { gravity: 0.4, atm: 1, hydro: 0, baseTemp:  -60, tilt: 25 },
-    venus:    { gravity: 0.9, atm: 5, hydro: 0, baseTemp:  460, tilt:  3 },
-    ocean:    { gravity: 1.0, atm: 3, hydro: 5, baseTemp:   20, tilt: 20 },
-    highgrav: { gravity: 2.5, atm: 3, hydro: 3, baseTemp:   15, tilt: 23 },
-    iceball:  { gravity: 0.8, atm: 2, hydro: 2, baseTemp:  -80, tilt: 15 },
-    titan:    { gravity: 0.1, atm: 4, hydro: 2, baseTemp: -180, tilt: 27 },
-    deadrock: { gravity: 0.5, atm: 0, hydro: 0, baseTemp:    0, tilt: 10 },
+    earth:    { gravity: 1.0, atm: 3, hydro: 3, baseTemp:   15, tilt: 23, moons: 1 },
+    arid:     { gravity: 1.0, atm: 2, hydro: 1, baseTemp:   40, tilt: 25, moons: 1 },
+    mars:     { gravity: 0.4, atm: 1, hydro: 0, baseTemp:  -60, tilt: 25, moons: 2 },
+    venus:    { gravity: 0.9, atm: 5, hydro: 0, baseTemp:  460, tilt:  3, moons: 0 },
+    ocean:    { gravity: 1.0, atm: 3, hydro: 5, baseTemp:   20, tilt: 20, moons: 1 },
+    highgrav: { gravity: 2.5, atm: 3, hydro: 3, baseTemp:   15, tilt: 23, moons: 2 },
+    iceball:  { gravity: 0.8, atm: 2, hydro: 2, baseTemp:  -80, tilt: 15, moons: 1 },
+    titan:    { gravity: 0.1, atm: 4, hydro: 2, baseTemp: -180, tilt: 27, moons: 0 },
+    deadrock: { gravity: 0.5, atm: 0, hydro: 0, baseTemp:    0, tilt: 10, moons: 1 },
 };
 
 // Slider value displays + stale tracking
-const sliderIds = ['sN','sP','sCn','sJ','sNs','sGravity','sAtm','sHydro','sBaseTemp','sTilt'];
+const sliderIds = ['sN','sP','sCn','sJ','sNs','sGravity','sAtm','sHydro','sBaseTemp','sTilt','sMoons'];
 let lastGenValues = {};
 
 function snapshotSliders() {
@@ -195,6 +196,19 @@ if (worldPresetEl) {
     });
 }
 
+// Moon count select — updates moons instantly without a full regeneration
+const moonsSelectEl = document.getElementById('sMoons');
+if (moonsSelectEl) {
+    moonsSelectEl.addEventListener('change', () => {
+        updateMoons(
+            state.curData?.seed ?? 0,
+            +moonsSelectEl.value,
+            state.planetaryParams ?? {}
+        );
+        updatePlanetCode(false);
+    });
+}
+
 /** Returns true if climate should be skipped (detail above threshold). */
 function shouldSkipClimate() {
     return detailFromSlider(+document.getElementById('sN').value) > AUTO_CLIMATE_THRESHOLD;
@@ -216,6 +230,7 @@ function applyPreset(name) {
                 hydro:    Math.floor(Math.random() * 5),
                 baseTemp: tempList[Math.floor(Math.random() * tempList.length)],
                 tilt:     Math.floor(Math.random() * 81),
+                moons:    Math.floor(Math.random() * 4),
             };
         } else {
             return;
@@ -228,6 +243,9 @@ function applyPreset(name) {
         el.value = val;
         el.dispatchEvent(new Event('input'));
     }
+    // Apply moon count from preset
+    const moonsEl = document.getElementById('sMoons');
+    if (moonsEl && p.moons !== undefined) moonsEl.value = p.moons;
     // input events above reset the dropdown to 'custom'; restore the preset label (random stays 'custom')
     const wp = document.getElementById('worldPreset');
     if (wp && name !== 'random') wp.value = name;
@@ -614,7 +632,8 @@ function updatePlanetCode(flash) {
         +(document.getElementById('sAtm')?.value      ?? 3),
         +(document.getElementById('sHydro')?.value    ?? 3),
         +(document.getElementById('sBaseTemp')?.value  ?? 15),
-        +(document.getElementById('sTilt')?.value     ?? 23)
+        +(document.getElementById('sTilt')?.value     ?? 23),
+        +(document.getElementById('sMoons')?.value     ?? 1)
     );
     currentCode = code;
     seedInput.value = code;
@@ -649,6 +668,12 @@ genBtn.addEventListener('generate-done', () => {
     setBaseTemp(state.planetaryParams.baseTemp);
     setAtmosphere(state.planetaryParams.atmosphere);
     setHydrosphere(state.planetaryParams.hydrosphere);
+    // Update moon meshes
+    updateMoons(
+        state.curData?.seed ?? 0,
+        +(document.getElementById('sMoons')?.value ?? 1),
+        state.planetaryParams
+    );
     // If climate not computed and current view is a climate layer, switch to Terrain
     if (!state.climateComputed && CLIMATE_LAYERS.has(state.debugLayer)) {
         state.debugLayer = '';
@@ -727,6 +752,9 @@ function applyCode(code) {
         el.value = val;
         el.dispatchEvent(new Event('input'));
     }
+    // Set moon count (not a range slider, handled separately)
+    const moonsApplyEl = document.getElementById('sMoons');
+    if (moonsApplyEl) moonsApplyEl.value = params.moonCount ?? 1;
     clearReapplyPending();
     showBuildOverlay();
     generate(params.seed, params.toggledIndices, onProgress, shouldSkipClimate());

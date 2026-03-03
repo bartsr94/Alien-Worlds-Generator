@@ -27,6 +27,7 @@ All three are considered together; ties are broken in the order above.
 - **Impact crater generation** — procedural impact cratering for airless (atmosphere=None) and trace-atmosphere (atmosphere=Trace) worlds. Power-law crater size distribution spanning micro-craters (2–8 km) to mega-basins (400–1400 km, Hellas/Caloris class). Each crater applies a parabolic bowl + raised Gaussian rim + thin ejecta blanket profile using exact great-circle arc distances. Large craters (>350 km) pre-flatten their interior for realistic flat-floored complex morphology. Trace-atmosphere worlds get 35% of airless crater density with degraded rims (+45% softer) simulating billions of years of thin-atmosphere erosion. Applied last in the terrain pipeline so fresh craters overprint all other features.
 - **Coastal roughening** — fractal noise with active/passive margin differentiation, domain warping for bays/headlands, and offshore island scattering
 - **3D globe rendering** with atmosphere rim shader, atmospheric haze sphere (full-disc opacity layer driven by atmosphere level — Thin = faint haze, Thick = orange-tan, Crushing = near-opaque cream, Titan-cold = deep orange haze blanket), translucent water sphere, terrain displacement, and starfield
+- **Procedural moon system** — 0–3 moons per planet, chooseable via the Moons selector. Each moon's orbital position, size, and surface appearance are seeded from the planet seed so the same code always produces identical moons. Appearance adapts to world type: icy for cold or high-hydrosphere worlds, warm tan for hot arid worlds, and classic grey-rock for everything else. Rendered as ShaderMaterial spheres with value-noise surface texture and a sharp solar terminator.
 - **Equirectangular map projection** with antimeridian wrapping
 - **Interactive editing** — Ctrl-click any plate to toggle between land and ocean, with live elevation recomputation
 - **Seasonal wind simulation** — pressure-driven wind patterns with a longitude-varying ITCZ that tracks the thermal equator (~5° over ocean, up to 15-20° over continents), Gaussian pressure bands (subtropical highs, subpolar lows, polar highs), land/sea thermal contrast for monsoon-like pressure reversals, elevation barometric effects, and Coriolis-deflected geostrophic wind with natural cross-equatorial flow reversal. Computed for both summer and winter seasons.
@@ -251,6 +252,7 @@ js/
   heuristic-precip.js   Heuristic zonal precipitation model — smooth latitude/continentality/orographic patterns
   temperature.js        Temperature simulation — ITCZ thermal equator, lapse rate, continentality, ocean currents
   scene.js              Three.js scene, cameras, controls, lights
+  moons.js              Procedural moon rendering — seed-driven orbital placement, sun-lit ShaderMaterial, rocky/icy surface variants
   planet-mesh.js        Voronoi mesh, map projection, hover highlight
   edit-mode.js          Ctrl-click plate toggle + hover info
   detail-scale.js       Non-linear (power-curve) detail slider mapping

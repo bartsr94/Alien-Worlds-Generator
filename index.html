@@ -51,6 +51,7 @@
             "Planetary Physics layer with gravity, atmosphere, hydrosphere, temperature, and axial tilt sliders",
             "Nine world presets: Earth-like, Mars-like, Venus-like, Titan-like, Dead Rock, Ocean World, Ice Ball, Arid Desert, High Gravity",
             "Atmospheric haze sphere for thick and crushing atmosphere worlds",
+            "Procedural moon system with 0-3 moons per planet, appearance adapts to world type",
             "Interactive plate editing",
             "Equirectangular map export up to 65536px",
             "Multiple visualization modes (terrain, satellite, climate, heightmap)",
@@ -202,6 +203,15 @@
                     <label>Axial Tilt <span class="tip" data-tip="Planet's axial tilt — affects seasonal amplitude, ITCZ migration, and polar ice extent.">?</span> <span class="v" id="vTilt">23°</span></label>
                     <input type="range" id="sTilt" min="0" max="90" value="23" step="1">
                     <div class="slider-hint"><span>No seasons</span><span>Extreme</span></div>
+                </div>
+                <div class="cg">
+                    <label>Moons <span class="tip" data-tip="Number of moons orbiting the planet. Moons are placed at fixed orbital distances and their appearance matches the world type.">?</span></label>
+                    <select id="sMoons">
+                        <option value="0">None</option>
+                        <option value="1" selected>1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                    </select>
                 </div>
                 <div id="planetWarning" class="planet-warning"></div>
             </div>
@@ -397,7 +407,7 @@
             </div>
             <div class="tutorial-step" data-step="1">
                 <h3>Shape Your World</h3>
-                <p>Pick a <strong>World Preset</strong> (Mars-like, Venus-like, Titan-like, Dead Rock, Ocean World, and more) or use the individual <strong>Planetary Physics</strong> sliders to set gravity, atmosphere, hydrosphere, temperature, and axial tilt. Use the <strong>Shape Your World</strong> sliders to control detail, plates, continents, and roughness, then hit <strong>Build New World</strong>. The <strong>Detail</strong> slider only changes rendering resolution &mdash; continent shapes stay the same, so you can iterate quickly at low detail and crank it up when the planet looks good. Expand <strong>Terrain Sculpting</strong> to fine-tune erosion and smoothing &mdash; these can be reapplied instantly with the <strong>&#x21bb;</strong> button.</p>
+                <p>Pick a <strong>World Preset</strong> (Mars-like, Venus-like, Titan-like, Dead Rock, Ocean World, and more) or use the individual <strong>Planetary Physics</strong> sliders to set gravity, atmosphere, hydrosphere, temperature, and axial tilt. Use <strong>Moons</strong> to add 0–3 procedural moons whose appearance matches your world type. Use the <strong>Shape Your World</strong> sliders to control detail, plates, continents, and roughness, then hit <strong>Build New World</strong>. The <strong>Detail</strong> slider only changes rendering resolution &mdash; continent shapes stay the same, so you can iterate quickly at low detail and crank it up when the planet looks good. Expand <strong>Terrain Sculpting</strong> to fine-tune erosion and smoothing &mdash; these can be reapplied instantly with the <strong>&#x21bb;</strong> button.</p>
             </div>
             <div class="tutorial-step" data-step="2">
                 <h3>Explore &amp; Edit</h3>

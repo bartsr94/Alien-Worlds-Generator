@@ -21,6 +21,7 @@ const SLIDERS = [
     { min: 0,    step: 1,    count: 6   }, // [14] Hydrosphere (0–5)
     { min: -150, step: 5,    count: 131 }, // [15] Base Temperature (-150 to +500°C, 5° steps)
     { min: 0,    step: 1,    count: 91  }, // [16] Axial Tilt (0–90°)
+    { min: 0,    step: 1,    count: 4   }, // [17] Moons (0–3)
 ];
 
 // Earth-default indices for the five new sliders (used when decoding old codes).
@@ -34,14 +35,16 @@ const EARTH_ATM_IDX        = 3;
 const EARTH_HYDRO_IDX      = 3;
 const EARTH_BASETEMP_IDX   = 33;
 const EARTH_AXIALTILT_IDX  = 23;
+const EARTH_MOON_IDX       = 1;  // 1 moon default for Earth / old codes
 
 // Mixed-radix bases right-to-left:
 //   twIdx[0], scIdx[1], rsIdx[2], teIdx[3], heIdx[4], glIdx[5], smIdx[6],
 //   nsIdx[7], cnIdx[8], pIdx[9], jIdx[10], nIdx[11],
 //   gravIdx[12], atmIdx[13], hydroIdx[14], btIdx[15], tiltIdx[16], seed
-const RADICES = [21, 21, 21, 21, 21, 21, 21, 51, 10, 117, 21, 2556, 30, 6, 6, 131, 91];
+const RADICES = [21, 21, 21, 21, 21, 21, 21, 51, 10, 117, 21, 2556, 30, 6, 6, 131, 91, 4];
 const SEED_MAX = 16777216; // 2^24
-const BASE_LEN  = 23; // current code length (with planetary physics sliders)
+const BASE_LEN  = 24; // current code length (with moons field)
+const PREV5_LEN = 23; // previous 23-char codes (with planetary physics, before moons) — Earth defaults for moons
 const PREV4_LEN = 18; // previous 18-char codes (before planetary physics) — Earth defaults for new sliders
 const PREV3_LEN = 17; // previous 17-char codes (before terrain warp)
 const PREV2_LEN = 16; // previous 16-char codes (before glacial erosion)
@@ -106,13 +109,14 @@ function parseBase36(str) {
  * @param {number} [hydrosphere=3] - Hydrosphere level 0–5
  * @param {number} [baseTemp=15] - Base temperature °C (-150–+500)
  * @param {number} [axialTilt=23] - Axial tilt in degrees (0–90)
- * @returns {string} base36 code (23 chars without edits, 23 + '-' + 2*k with k edits)
+ * @param {number} [moonCount=1] - Number of moons (0–3)
+ * @returns {string} base36 code (24 chars without edits, 24 + '-' + 2*k with k edits)
  */
 export function encodePlanetCode(
     seed, N, jitter, P, numContinents, roughness,
     terrainWarp, smoothing, glacialErosion, hydraulicErosion, thermalErosion, ridgeSharpening, soilCreep,
     toggledIndices = [],
-    gravity = 1.0, atmosphere = 3, hydrosphere = 3, baseTemp = 15, axialTilt = 23
+    gravity = 1.0, atmosphere = 3, hydrosphere = 3, baseTemp = 15, axialTilt = 23, moonCount = 1
 ) {
     const nIdx    = toIndex(N, SLIDERS[0]);
     const jIdx    = toIndex(jitter, SLIDERS[1]);
@@ -131,11 +135,13 @@ export function encodePlanetCode(
     const hydroIdx= toIndex(hydrosphere, SLIDERS[14]);
     const btIdx   = toIndex(baseTemp,    SLIDERS[15]);
     const tiltIdx = toIndex(axialTilt,   SLIDERS[16]);
+    const moonIdx  = toIndex(moonCount,   SLIDERS[17]);
 
     // Mixed-radix packing — seed is the most-significant residual.
-    // Pack order (most→least significant): seed, tiltIdx, btIdx, hydroIdx, atmIdx,
+    // Pack order (most→least significant): seed, moonIdx, tiltIdx, btIdx, hydroIdx, atmIdx,
     //   gravIdx, nIdx, jIdx, pIdx, cnIdx, nsIdx, smIdx, glIdx, heIdx, teIdx, rsIdx, scIdx, twIdx
     let packed = BigInt(seed);
+    packed = packed * BigInt(RADICES[17]) + BigInt(moonIdx);  // * 4
     packed = packed * BigInt(RADICES[16]) + BigInt(tiltIdx); // * 91
     packed = packed * BigInt(RADICES[15]) + BigInt(btIdx);   // * 131
     packed = packed * BigInt(RADICES[14]) + BigInt(hydroIdx);// * 6
@@ -179,9 +185,9 @@ function earthPhysicsDefaults() {
 
 /**
  * Decode a base36 planet code back into planet parameters.
- * Supports 23-char (current), 18-char (prev4), 17-char (prev3),
+ * Supports 24-char (current), 23-char (prev5), 18-char (prev4), 17-char (prev3),
  * 16-char (prev2), 14-char (prev), and 13-char (legacy) codes.
- * Old codes get Earth defaults for the five new planetary-physics sliders.
+ * Old codes get Earth defaults for the five new planetary-physics sliders and moons.
  * @param {string} code
  * @returns {object|null}
  */
@@ -199,8 +205,9 @@ export function decodePlanetCode(code) {
     const isPrev2  = base.length === PREV2_LEN;
     const isPrev3  = base.length === PREV3_LEN;
     const isPrev4  = base.length === PREV4_LEN;
+    const isPrev5  = base.length === PREV5_LEN;
     const isNew    = base.length === BASE_LEN;
-    if (!isLegacy && !isPrev && !isPrev2 && !isPrev3 && !isPrev4 && !isNew) return null;
+    if (!isLegacy && !isPrev && !isPrev2 && !isPrev3 && !isPrev4 && !isPrev5 && !isNew) return null;
     if (!/^[0-9a-z]+$/.test(base)) return null;
     if (toggleStr && !/^[0-9a-z]+$/.test(toggleStr)) return null;
     if (toggleStr && toggleStr.length % IDX_CHARS !== 0) return null;
@@ -562,7 +569,7 @@ export function decodePlanetCode(code) {
         };
     }
 
-    // New 23-char decode: all sliders including planetary physics.
+    // New 24-char / prev5 23-char decode: all sliders including planetary physics.
     const twIdx   = Number(packed % BigInt(RADICES[0]));  packed = packed / BigInt(RADICES[0]);
     const scIdx   = Number(packed % BigInt(RADICES[1]));  packed = packed / BigInt(RADICES[1]);
     const rsIdx   = Number(packed % BigInt(RADICES[2]));  packed = packed / BigInt(RADICES[2]);
@@ -581,6 +588,12 @@ export function decodePlanetCode(code) {
     const btIdx   = Number(packed % BigInt(RADICES[15])); packed = packed / BigInt(RADICES[15]);
     const tiltIdx = Number(packed % BigInt(RADICES[16])); packed = packed / BigInt(RADICES[16]);
 
+    // Moon count — only present in 24-char (isNew) codes; default to 1 for prev5 codes
+    let moonIdx = EARTH_MOON_IDX;
+    if (isNew) {
+        moonIdx = Number(packed % BigInt(RADICES[17])); packed = packed / BigInt(RADICES[17]);
+    }
+
     const seed = Number(packed);
 
     // Validate ranges
@@ -593,7 +606,7 @@ export function decodePlanetCode(code) {
         scIdx   >= SLIDERS[10].count || twIdx >= SLIDERS[11].count ||
         gravIdx >= SLIDERS[12].count || atmIdx >= SLIDERS[13].count ||
         hydroIdx>= SLIDERS[14].count || btIdx >= SLIDERS[15].count ||
-        tiltIdx >= SLIDERS[16].count) return null;
+        tiltIdx >= SLIDERS[16].count || moonIdx >= SLIDERS[17].count) return null;
 
     const P = fromIndex(pIdx, SLIDERS[2]);
 
@@ -626,6 +639,7 @@ export function decodePlanetCode(code) {
         hydrosphere:      fromIndex(hydroIdx, SLIDERS[14]),
         baseTemp:         fromIndex(btIdx,    SLIDERS[15]),
         axialTilt:        fromIndex(tiltIdx,  SLIDERS[16]),
+        moonCount:        fromIndex(moonIdx,   SLIDERS[17]),
         toggledIndices,
     };
 }
