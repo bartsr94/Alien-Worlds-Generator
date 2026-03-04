@@ -786,3 +786,57 @@ export function applySoilCreep(mesh, r_elevation, r_isOcean, iterations, strengt
         for (let li = 0; li < ilCount; li++) r_elevation[interiorLand[li]] = tmp[interiorLand[li]];
     }
 }
+
+/**
+ * Hypsometric distribution correction — gently remaps land and ocean elevation
+ * distributions toward more spread-out profiles, ensuring land elevations span
+ * their available range rather than clustering near the median.
+ *
+ * Land and ocean populations are corrected independently, preserving the
+ * sea-level boundary. Uses a mild power-law target CDF blended at 0.15
+ * weight (Lesson 6 — conservative to avoid washing out structural pipeline work).
+ *
+ * Scale-invariant: operates purely on elevation values, not cell counts.
+ */
+export function applyHypsometricCorrection(mesh, r_elevation, r_isOcean) {
+    const N = mesh.numRegions;
+    const BLEND = 0.15;
+
+    // Collect land and ocean cell indices
+    const land = [];
+    const ocean = [];
+    for (let r = 0; r < N; r++) {
+        if (r_isOcean[r]) ocean.push(r);
+        else land.push(r);
+    }
+
+    /**
+     * Sort cells by elevation (ascending) to get their current rank-percentile,
+     * then map each rank through targetCDF(t) to compute a target elevation,
+     * and blend toward it at BLEND weight.
+     * Strictly preserves [eMin, eMax] — no clamping artifacts.
+     */
+    function remapPopulation(cells, targetCDF) {
+        if (cells.length < 2) return;
+        cells.sort((a, b) => r_elevation[a] - r_elevation[b]);
+        const n = cells.length;
+        const eMin = r_elevation[cells[0]];
+        const eMax = r_elevation[cells[n - 1]];
+        if (eMax <= eMin) return; // degenerate population
+        const range = eMax - eMin;
+        for (let i = 0; i < n; i++) {
+            const t = i / (n - 1);               // current rank-percentile [0,1]
+            const targetT = targetCDF(t);         // target percentile [0,1]
+            const targetElev = eMin + targetT * range;
+            r_elevation[cells[i]] += (targetElev - r_elevation[cells[i]]) * BLEND;
+        }
+    }
+
+    // Land: mild lowland bias — t^0.80 CDF spreads the lower end more,
+    // producing a gentle peak near sea level with gradual taper to highlands.
+    remapPopulation(land,  t => Math.pow(t, 0.80));
+
+    // Ocean: mild depth bias — t^1.20 CDF shifts the distribution slightly
+    // deeper, widening the separation between shelf and abyssal populations.
+    remapPopulation(ocean, t => Math.pow(t, 1.20));
+}

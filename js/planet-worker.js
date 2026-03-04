@@ -7,7 +7,7 @@ import { setDelaunator, buildSphere, generateTriangleCenters, SphereMesh, comput
 import { generateCoarsePlates, projectCoarsePlates } from './coarse-plates.js';
 import { smoothAndReconnectPlates } from './plates.js';
 import { assignElevation } from './elevation.js';
-import { warpTerrain, smoothElevation, erodeComposite, sharpenRidges, applySoilCreep } from './terrain-post.js';
+import { warpTerrain, smoothElevation, erodeComposite, sharpenRidges, applySoilCreep, applyHypsometricCorrection } from './terrain-post.js';
 import { stampCraters } from './impact-craters.js';
 import { computeWind } from './wind.js';
 import { computeOceanCurrents } from './ocean.js';
@@ -103,6 +103,12 @@ function runPostProcessing(mesh, r_xyz, r_elevation, params, neighborDist, seed,
         const t0 = performance.now();
         applySoilCreep(mesh, r_elevation, r_isOcean, 3, 0.1125);
         timing.push({ stage: 'Soil creep (3 iters)', ms: performance.now() - t0 });
+    }
+
+    {
+        const t0 = performance.now();
+        applyHypsometricCorrection(mesh, r_elevation, r_isOcean);
+        timing.push({ stage: 'Hypsometric correction', ms: performance.now() - t0 });
     }
 
     // Impact craters: stamp on airless (atm=0) and trace-atmosphere (atm=1) worlds.
