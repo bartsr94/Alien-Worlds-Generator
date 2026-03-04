@@ -66,6 +66,13 @@ After any code change that adds a planetary parameter that affects rendering, fo
 
 Existing examples: `_upliftMult`/`setUpliftMult` (mountain height scaling), `_hasLiquidOcean`/`setHasLiquidOcean` (dry-world terrain colors), and `_baseTemp`/`setBaseTemp`, `_atmosphere`/`setAtmosphere`, `_hydrosphere`/`setHydrosphere` (alien/arid/ice/barren palette sub-variant selection).
 
+**When NOT to use the color-map.js module-state pattern:** if the param controls whether a feature renders *at all* (a boolean visibility gate) rather than influencing colour or palette, read `state.planetaryParams` directly at the top of the relevant render function(s) in `planet-mesh.js`. This avoids the import/setter boilerplate for something that isn't a colour calculation. Example: `riversPlausible` (river corridor rendering is suppressed on frozen worlds ≤ −30 °C, steam worlds ≥ 130 °C, or hydrosphere 0) is computed inline in `buildMapMesh`, `buildMesh`, and `updateMeshColors` as:
+```js
+const _rp_temp  = state.planetaryParams?.baseTemp    ?? 15;
+const _rp_hydro = state.planetaryParams?.hydrosphere ?? 3;
+const riversPlausible = _rp_hydro >= 1 && _rp_temp > -30 && _rp_temp < 130;
+```
+
 After any code change that adds a new full-disc globe visual effect (something visible across the whole planet face, not just the rim), follow the **`scene.js` globe layer pattern**:
 
 1. Create a new `THREE.Mesh` with a `THREE.SphereGeometry` at radius slightly above the terrain sphere (the water sphere is at r=1.0, the haze is at r=1.01, the atmosphere rim is at r=1.12 — pick the appropriate layer)

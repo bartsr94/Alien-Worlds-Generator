@@ -274,7 +274,10 @@ export function buildMapMesh() {
     const isHabitability = debugLayer === 'habitability';
     const habitabilityArr = isHabitability ? (debugLayers && debugLayers.habitability) : null;
     const isFlowAccum = debugLayer === 'flowAccum';
-    const flowAccumArr = (isFlowAccum || !debugLayer || debugLayer === 'biome')
+    const _rp_temp = state.planetaryParams?.baseTemp ?? 15;
+    const _rp_hydro = state.planetaryParams?.hydrosphere ?? 3;
+    const riversPlausible = _rp_hydro >= 1 && _rp_temp > -30 && _rp_temp < 130;
+    const flowAccumArr = riversPlausible && (isFlowAccum || !debugLayer || debugLayer === 'biome')
         ? ((debugLayers && debugLayers.flowAccum) || null)
         : null;
     let flowAccumMax = 0, riverThreshold = Infinity;
@@ -637,7 +640,10 @@ export function buildMesh() {
     const isHabitability = debugLayer === 'habitability';
     const habitabilityArr = isHabitability ? (debugLayers && debugLayers.habitability) : null;
     const isFlowAccum = debugLayer === 'flowAccum';
-    const flowAccumArr = (isFlowAccum || !debugLayer || debugLayer === 'biome')
+    const _rp_temp = state.planetaryParams?.baseTemp ?? 15;
+    const _rp_hydro = state.planetaryParams?.hydrosphere ?? 3;
+    const riversPlausible = _rp_hydro >= 1 && _rp_temp > -30 && _rp_temp < 130;
+    const flowAccumArr = riversPlausible && (isFlowAccum || !debugLayer || debugLayer === 'biome')
         ? ((debugLayers && debugLayers.flowAccum) || null)
         : null;
     let flowAccumMax = 0, riverThreshold = Infinity;
@@ -886,7 +892,10 @@ export function updateMeshColors() {
     const isHabitability = debugLayer === 'habitability';
     const habitabilityArr = isHabitability ? (debugLayers && debugLayers.habitability) : null;
     const isFlowAccum = debugLayer === 'flowAccum';
-    const flowAccumArr = (isFlowAccum || !debugLayer || debugLayer === 'biome')
+    const _rp_temp = state.planetaryParams?.baseTemp ?? 15;
+    const _rp_hydro = state.planetaryParams?.hydrosphere ?? 3;
+    const riversPlausible = _rp_hydro >= 1 && _rp_temp > -30 && _rp_temp < 130;
+    const flowAccumArr = riversPlausible && (isFlowAccum || !debugLayer || debugLayer === 'biome')
         ? ((debugLayers && debugLayers.flowAccum) || null)
         : null;
     let flowAccumMax = 0, riverThreshold = Infinity;
