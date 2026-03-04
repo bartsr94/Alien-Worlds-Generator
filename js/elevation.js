@@ -1257,12 +1257,17 @@ export function assignElevation(mesh, r_xyz, plateIsOcean, r_plate, plateVec, pl
 
     // Gravity scaling — higher gravity compresses terrain, lower allows taller mountains.
     // upliftMultiplier = 1/g: at 0.5g → 2× height, at 2g → 0.5× height.
-    // Only positive (land) elevations are scaled; ocean depths are unaffected.
+    // Land (positive) elevations use the full multiplier. Ocean basin depths use sqrt(mult) —
+    // crustal compression is less gravity-sensitive than isostatic mountain uplift, so
+    // low-g worlds have somewhat shallower basins relative to their dramatically taller peaks.
     if (params && params.upliftMultiplier !== 1.0) {
         const mult = params.upliftMultiplier;
+        const oceanMult = Math.sqrt(mult);
         for (let r = 0; r < numRegions; r++) {
             if (r_elevation[r] > 0) {
                 r_elevation[r] *= mult;
+            } else {
+                r_elevation[r] *= oceanMult;
             }
         }
     }

@@ -194,7 +194,6 @@ function advectMoisture(mesh, r_xyz, r_heightKm, r_isLand,
  * @returns {{ r_precip_summer, r_precip_winter }} normalized 0–1 arrays
  */
 export function computePrecipitation(mesh, r_xyz, r_elevation, windResult, oceanResult, params = null) {
-    console.log('[precipitation.js] computePrecipitation called, numRegions:', mesh.numRegions);
     const numRegions = mesh.numRegions;
 
     // No precipitation on airless or waterless worlds — return zero fields immediately.

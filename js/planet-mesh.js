@@ -211,6 +211,13 @@ function habitabilityColor(t) {
     return [0.08, 0.72, 0.22];                    // green (habitable)
 }
 
+// Flow-accumulation debug colour — deep blue gradient using quartic stretch.
+function flowAccumColor(v, maxV) {
+    if (maxV <= 0) return [0.05, 0.05, 0.10];
+    const t = Math.min(1, Math.sqrt(Math.sqrt(v / maxV)));
+    return [0.02 + 0.08 * (1 - t), 0.05 + 0.25 * t, 0.12 + 0.65 * t];
+}
+
 // Plate colours — green shades for land, blue for ocean.
 export function computePlateColors(plateSeeds, plateIsOcean) {
     state.plateColors = {};
@@ -266,7 +273,23 @@ export function buildMapMesh() {
     const hydroStateArr = isHydroState ? (debugLayers && debugLayers.hydroState) : null;
     const isHabitability = debugLayer === 'habitability';
     const habitabilityArr = isHabitability ? (debugLayers && debugLayers.habitability) : null;
-    if (!isHeightmap && !isLandHeightmap && !isOceanCurrent && !isPrecip && !isRainShadow && !isTemp && !isKoppen && !isBiome && !isCont && !isHydroState && !isHabitability && debugLayer && debugLayers && debugLayers[debugLayer]) {
+    const isFlowAccum = debugLayer === 'flowAccum';
+    const flowAccumArr = (isFlowAccum || !debugLayer || debugLayer === 'biome')
+        ? ((debugLayers && debugLayers.flowAccum) || null)
+        : null;
+    let flowAccumMax = 0, riverThreshold = Infinity;
+    if (flowAccumArr) {
+        const landVals = [];
+        for (let r = 0; r < mesh.numRegions; r++) {
+            if (r_elevation[r] > 0 && flowAccumArr[r] > 0) landVals.push(flowAccumArr[r]);
+        }
+        if (landVals.length > 0) {
+            landVals.sort((a, b) => a - b);
+            flowAccumMax = landVals[Math.min(landVals.length - 1, Math.floor(landVals.length * 0.995))];
+            riverThreshold = landVals[Math.min(landVals.length - 1, Math.floor(landVals.length * 0.992))];
+        }
+    }
+    if (!isHeightmap && !isLandHeightmap && !isOceanCurrent && !isPrecip && !isRainShadow && !isTemp && !isKoppen && !isBiome && !isCont && !isHydroState && !isHabitability && !isFlowAccum && debugLayer && debugLayers && debugLayers[debugLayer]) {
         dbgArr = debugLayers[debugLayer];
         for (let r = 0; r < mesh.numRegions; r++) {
             if (dbgArr[r] < dbgMin) dbgMin = dbgArr[r];
@@ -328,6 +351,8 @@ export function buildMapMesh() {
             [cr, cg, cb] = landHeightmapColor(r_elevation[br]);
         } else if (isHeightmap) {
             [cr, cg, cb] = heightmapColor(r_elevation[br]);
+        } else if (isFlowAccum && flowAccumArr) {
+            [cr, cg, cb] = flowAccumColor(flowAccumArr[br], flowAccumMax);
         } else if (dbgArr) {
             [cr, cg, cb] = debugValueToColor(dbgArr[br], dbgMin, dbgMax);
         } else if (showPlates) {
@@ -343,6 +368,13 @@ export function buildMapMesh() {
             else                              { cr=0.15; cg=0.15; cb=0.18; }
         } else {
             [cr, cg, cb] = elevationToColor(re);
+        }
+        // River tinting in default terrain and biome views
+        if (flowAccumArr && !isFlowAccum && r_elevation[br] > 0 && flowAccumArr[br] >= riverThreshold) {
+            const t = Math.min(1, 0.5 + 0.5 * (flowAccumArr[br] - riverThreshold) / Math.max(1, flowAccumMax - riverThreshold));
+            cr = cr * (1 - t * 0.6) + 0.2 * t * 0.6;
+            cg = cg * (1 - t * 0.5) + 0.45 * t * 0.5;
+            cb = cb * (1 - t * 0.4) + 0.8 * t * 0.4;
         }
 
         const x0 = t_xyz[3*it], y0 = t_xyz[3*it+1], z0 = t_xyz[3*it+2];
@@ -604,7 +636,23 @@ export function buildMesh() {
     const hydroStateArr = isHydroState ? (debugLayers && debugLayers.hydroState) : null;
     const isHabitability = debugLayer === 'habitability';
     const habitabilityArr = isHabitability ? (debugLayers && debugLayers.habitability) : null;
-    if (!isHeightmap && !isLandHeightmap && !isOceanCurrent && !isPrecip && !isRainShadow && !isTemp && !isKoppen && !isBiome && !isCont && !isHydroState && !isHabitability && debugLayer && debugLayers && debugLayers[debugLayer]) {
+    const isFlowAccum = debugLayer === 'flowAccum';
+    const flowAccumArr = (isFlowAccum || !debugLayer || debugLayer === 'biome')
+        ? ((debugLayers && debugLayers.flowAccum) || null)
+        : null;
+    let flowAccumMax = 0, riverThreshold = Infinity;
+    if (flowAccumArr) {
+        const landVals = [];
+        for (let r = 0; r < mesh.numRegions; r++) {
+            if (r_elevation[r] > 0 && flowAccumArr[r] > 0) landVals.push(flowAccumArr[r]);
+        }
+        if (landVals.length > 0) {
+            landVals.sort((a, b) => a - b);
+            flowAccumMax = landVals[Math.min(landVals.length - 1, Math.floor(landVals.length * 0.995))];
+            riverThreshold = landVals[Math.min(landVals.length - 1, Math.floor(landVals.length * 0.992))];
+        }
+    }
+    if (!isHeightmap && !isLandHeightmap && !isOceanCurrent && !isPrecip && !isRainShadow && !isTemp && !isKoppen && !isBiome && !isCont && !isHydroState && !isHabitability && !isFlowAccum && debugLayer && debugLayers && debugLayers[debugLayer]) {
         dbgArr = debugLayers[debugLayer];
         for (let r = 0; r < mesh.numRegions; r++) {
             if (dbgArr[r] < dbgMin) dbgMin = dbgArr[r];
@@ -691,6 +739,8 @@ export function buildMesh() {
             [cr, cg, cb] = landHeightmapColor(r_elevation[br]);
         } else if (isHeightmap) {
             [cr, cg, cb] = heightmapColor(r_elevation[br]);
+        } else if (isFlowAccum && flowAccumArr) {
+            [cr, cg, cb] = flowAccumColor(flowAccumArr[br], flowAccumMax);
         } else if (dbgArr) {
             [cr, cg, cb] = debugValueToColor(dbgArr[br], dbgMin, dbgMax);
         } else if (showPlates) {
@@ -706,6 +756,13 @@ export function buildMesh() {
             else                              { cr=0.15; cg=0.15; cb=0.18; }
         } else {
             [cr, cg, cb] = elevationToColor(re);
+        }
+        // River tinting in default terrain and biome views
+        if (flowAccumArr && !isFlowAccum && r_elevation[br] > 0 && flowAccumArr[br] >= riverThreshold) {
+            const t = Math.min(1, 0.5 + 0.5 * (flowAccumArr[br] - riverThreshold) / Math.max(1, flowAccumMax - riverThreshold));
+            cr = cr * (1 - t * 0.6) + 0.2 * t * 0.6;
+            cg = cg * (1 - t * 0.5) + 0.45 * t * 0.5;
+            cb = cb * (1 - t * 0.4) + 0.8 * t * 0.4;
         }
         for (let j = 0; j < 3; j++) {
             col[off+j*3]   = cr;
@@ -828,7 +885,23 @@ export function updateMeshColors() {
     const hydroStateArr = isHydroState ? (debugLayers && debugLayers.hydroState) : null;
     const isHabitability = debugLayer === 'habitability';
     const habitabilityArr = isHabitability ? (debugLayers && debugLayers.habitability) : null;
-    if (!isHeightmap && !isLandHeightmap && !isOceanCurrent && !isPrecip && !isRainShadow && !isTemp && !isKoppen && !isBiome && !isCont && !isHydroState && !isHabitability && debugLayer && debugLayers && debugLayers[debugLayer]) {
+    const isFlowAccum = debugLayer === 'flowAccum';
+    const flowAccumArr = (isFlowAccum || !debugLayer || debugLayer === 'biome')
+        ? ((debugLayers && debugLayers.flowAccum) || null)
+        : null;
+    let flowAccumMax = 0, riverThreshold = Infinity;
+    if (flowAccumArr) {
+        const landVals = [];
+        for (let r = 0; r < mesh.numRegions; r++) {
+            if (r_elevation[r] > 0 && flowAccumArr[r] > 0) landVals.push(flowAccumArr[r]);
+        }
+        if (landVals.length > 0) {
+            landVals.sort((a, b) => a - b);
+            flowAccumMax = landVals[Math.min(landVals.length - 1, Math.floor(landVals.length * 0.995))];
+            riverThreshold = landVals[Math.min(landVals.length - 1, Math.floor(landVals.length * 0.992))];
+        }
+    }
+    if (!isHeightmap && !isLandHeightmap && !isOceanCurrent && !isPrecip && !isRainShadow && !isTemp && !isKoppen && !isBiome && !isCont && !isHydroState && !isHabitability && !isFlowAccum && debugLayer && debugLayers && debugLayers[debugLayer]) {
         dbgArr = debugLayers[debugLayer];
         for (let r = 0; r < mesh.numRegions; r++) {
             if (dbgArr[r] < dbgMin) dbgMin = dbgArr[r];
@@ -852,6 +925,7 @@ export function updateMeshColors() {
         if (isOceanCurrent) return [0.5, 0, 0.5];
         if (isHydroState && hydroStateArr) return hydroStateColor(hydroStateArr[br]);
         if (isHabitability && habitabilityArr) return habitabilityColor(habitabilityArr[br]);
+        if (isFlowAccum && flowAccumArr) return flowAccumColor(flowAccumArr[br], flowAccumMax);
         if (isLandHeightmap) return landHeightmapColor(r_elevation[br]);
         if (isHeightmap) return heightmapColor(r_elevation[br]);
         if (dbgArr) return debugValueToColor(dbgArr[br], dbgMin, dbgMax);
@@ -878,7 +952,14 @@ export function updateMeshColors() {
 
     for (let s = 0; s < numSides; s++) {
         const br = mesh.s_begin_r(s);
-        const [cr, cg, cb] = getRegionColor(br);
+        let [cr, cg, cb] = getRegionColor(br);
+        // River tinting in default terrain and biome views
+        if (flowAccumArr && !isFlowAccum && r_elevation[br] > 0 && flowAccumArr[br] >= riverThreshold) {
+            const t = Math.min(1, 0.5 + 0.5 * (flowAccumArr[br] - riverThreshold) / Math.max(1, flowAccumMax - riverThreshold));
+            cr = cr * (1 - t * 0.6) + 0.2 * t * 0.6;
+            cg = cg * (1 - t * 0.5) + 0.45 * t * 0.5;
+            cb = cb * (1 - t * 0.4) + 0.8 * t * 0.4;
+        }
         const off = s * 9;
         for (let j = 0; j < 3; j++) {
             colors[off + j*3]     = cr;
@@ -899,7 +980,14 @@ export function updateMeshColors() {
         for (let f = 0; f < fts.length; f++) {
             const s = fts[f];
             const br = mesh.s_begin_r(s);
-            const [cr, cg, cb] = getRegionColor(br);
+            let [cr, cg, cb] = getRegionColor(br);
+            // River tinting in default terrain and biome views
+            if (flowAccumArr && !isFlowAccum && r_elevation[br] > 0 && flowAccumArr[br] >= riverThreshold) {
+                const t = Math.min(1, 0.5 + 0.5 * (flowAccumArr[br] - riverThreshold) / Math.max(1, flowAccumMax - riverThreshold));
+                cr = cr * (1 - t * 0.6) + 0.2 * t * 0.6;
+                cg = cg * (1 - t * 0.5) + 0.45 * t * 0.5;
+                cb = cb * (1 - t * 0.4) + 0.8 * t * 0.4;
+            }
             const off = f * 9;
             for (let j = 0; j < 3; j++) {
                 mapColors[off + j*3]     = cr;

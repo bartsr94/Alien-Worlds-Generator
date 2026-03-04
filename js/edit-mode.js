@@ -151,11 +151,14 @@ function buildHoverHTML(region, plate) {
         } else {
             lines.push(`<span class="hi-label">Temp</span> ${tS.toFixed(0)}°C / ${tW.toFixed(0)}°C`);
 
-            // Precipitation (land only)
+            // Precipitation (land only).
+            // Multiply by 1250 mm — this maps the simulation's 0–1 normalised precip
+            // to approximate mm/season (95th-percentile wet-season ≈ ~1250 mm for Earth).
+            // Values above 1.0 (high-precipScale wet worlds) are allowed through unclamped.
             if (d.r_precip_summer) {
-                const pS = (Math.max(0, Math.min(1, d.r_precip_summer[region])) * 1000).toFixed(0);
-                const pW = (Math.max(0, Math.min(1, d.r_precip_winter[region])) * 1000).toFixed(0);
-                lines.push(`<span class="hi-label">Precip</span> ${pS} / ${pW} mm`);
+                const pS = (Math.max(0, d.r_precip_summer[region]) * 1250).toFixed(0);
+                const pW = (Math.max(0, d.r_precip_winter[region]) * 1250).toFixed(0);
+                lines.push(`<span class="hi-label">Precip</span> ${pS} / ${pW} mm (est.)`);
             }
 
             // Köppen (land only)

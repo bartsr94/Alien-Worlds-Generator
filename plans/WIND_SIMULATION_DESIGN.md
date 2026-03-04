@@ -1,5 +1,7 @@
 # Seasonal Wind Simulation — Pressure-Driven with Longitude-Varying ITCZ
 
+> **Status: Implemented.** This document describes the design that was built and shipped in production. The wind simulation described below is fully operational in `js/wind.js`. Preserved for architectural reference.
+
 ## Context
 
 World Orogen has zero climate/atmospheric simulation. This adds seasonal wind driven by high/low pressure zones — the core physical mechanism behind all planetary wind. The ITCZ (low pressure convergence) tracks a longitude-varying "thermal equator" that hugs the equator over ocean but pushes 15-20° poleward over continents, creating monsoons and seasonal wind reversals. Inspired by Worldbuilding Pasta's climate methodology and Madeline James's pressure band approach.

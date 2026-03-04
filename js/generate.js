@@ -426,6 +426,7 @@ if (worker) {
                 d.r_elevation = msg.r_elevation;
                 d.t_elevation = msg.t_elevation;
                 d.debugLayers.erosionDelta = msg.erosionDelta;
+                if (msg.flowAccum) d.debugLayers.flowAccum = msg.flowAccum;
                 if (msg.r_wind_east_summer) {
                     d.r_wind_east_summer = msg.r_wind_east_summer;
                     d.r_wind_north_summer = msg.r_wind_north_summer;
@@ -833,6 +834,7 @@ function generateFallback(overrideSeed, toggledIndices, onProgress, skipClimate)
             const dl_erosionDelta = new Float32Array(ctx.mesh.numRegions);
             for (let r = 0; r < ctx.mesh.numRegions; r++) dl_erosionDelta[r] = r_elevation[r] - preErosion[r];
             debugLayers.erosionDelta = dl_erosionDelta;
+            debugLayers.flowAccum = m.post.computeFlowAccumulation(ctx.mesh, r_elevation);
             if (!skipClimate) {
                 const windResult = m.wind.computeWind(ctx.mesh, ctx.r_xyz, r_elevation, ctx.plateIsOcean, ctx.r_plate, ctx.noise);
                 debugLayers.pressureSummer = windResult.r_pressure_summer;

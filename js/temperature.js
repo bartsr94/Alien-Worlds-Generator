@@ -72,8 +72,10 @@ export function computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanRe
 
     const { r_lat, r_lon, r_isLand, r_continentality, r_plateContinentality } = windResult;
 
-    // Minimal smoothing: 1 pass just to blend cell-to-cell noise
-    const smoothPasses = 1;
+    // Scale smoothing passes to target ~200 km physical blending radius regardless of resolution.
+    // (CLAUDE.md scale-invariance rule: passes = round(targetKm / avgEdgeKm))
+    const avgEdgeKm = (Math.PI * 6371) / Math.sqrt(numRegions);
+    const smoothPasses = Math.max(1, Math.round(200 / avgEdgeKm));
 
     // ── Planetary params ──────────────────────────────────────────────────────
     // equatorialT: peak temperature at the thermal equator (ITCZ).

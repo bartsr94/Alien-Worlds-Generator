@@ -109,10 +109,10 @@ export function classifyKoppen(mesh, r_elevation, tempResult, precipResult) {
         // physical °C and are intentionally set well beyond Earth's climate range
         // so terrestrial worlds are unaffected.
         if (Tann  > 250) { r_koppen[r] = CODE_TO_ID['XV']; continue; }  // Hellscape: supercritical / Venus-class
-        if (Tann  >  70 && (pSummer[r] + pWinter[r]) * 1000 > 400)
+        if (Tann  >  70 && (pSummer[r] + pWinter[r]) > 0.4)
                          { r_koppen[r] = CODE_TO_ID['XP']; continue; }  // Primordial: hot + wet (archean, steam-jungle)
         if (Tann  >  70) { r_koppen[r] = CODE_TO_ID['XS']; continue; }  // Scorched: extreme heat, dry
-        if (Thot  < -30 && (pSummer[r] + pWinter[r]) * 1000 < 80)
+        if (Thot  < -30 && (pSummer[r] + pWinter[r]) < 0.08)
                          { r_koppen[r] = CODE_TO_ID['XD']; continue; }  // Cryo-Desert: frozen AND dry
         if (Thot  < -30) { r_koppen[r] = CODE_TO_ID['XF']; continue; }  // Deep Freeze: cryogenic
 

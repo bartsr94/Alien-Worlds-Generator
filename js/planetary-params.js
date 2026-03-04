@@ -197,13 +197,11 @@ export function buildPlanetaryParams(sliders = {}) {
         // ── Temperature ──────────────────────────────────────────────────────
         // equatorialTempC: the thermal-equatorial peak fed into temperature.js.
         // The +13°C offset represents Earth's equatorial-peak-over-global-mean.
-        // This value is NOT yet used by temperature.js in Phase 1; Phase 3 wires it.
         equatorialTempC:       tempC + 13 + greenhouseBonus,
         // tempRangeC: pole-to-equator temperature drop in the power-law curve.
         // At Moderate (density=1.0) this equals Earth's hardcoded 47°C range.
         tempRangeC:            47 * (atmosphereDensity > 0 ? 1 / atmosphereDensity : 1),
         seasonalAmplitude:     tiltToSeasonalAmplitude(tilt),
-        itczMigrationDeg:      tilt * 0.5,
 
         // ── Visual ───────────────────────────────────────────────────────────
         surfaceFluidColor:     hydrosphereFluidColor(sliders),

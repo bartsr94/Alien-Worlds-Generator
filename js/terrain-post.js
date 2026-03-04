@@ -840,3 +840,62 @@ export function applyHypsometricCorrection(mesh, r_elevation, r_isOcean) {
     // deeper, widening the separation between shelf and abyssal populations.
     remapPopulation(ocean, t => Math.pow(t, 1.20));
 }
+
+/**
+ * Compute per-cell flow accumulation by building a steepest-descent drainage
+ * graph on the final elevation field and propagating unit flow downstream.
+ *
+ * Each land cell starts with a flow of 1 (its own unit contribution).  Flow is
+ * routed to the steepest downslope neighbour and accumulated there, so trunk
+ * river cells collect contributions from every upstream cell in their catchment.
+ * Ocean cells always receive 0.
+ *
+ * The result is proportional to drainage area and can be used to identify
+ * major river corridors (high-percentile cells).
+ *
+ * Scale-invariant: operates on elevation values and adjacency topology only.
+ */
+export function computeFlowAccumulation(mesh, r_elevation) {
+    const N = mesh.numRegions;
+    const { adjOffset, adjList } = mesh;
+
+    // Mark ocean cells
+    const r_isOcean = new Uint8Array(N);
+    for (let r = 0; r < N; r++) r_isOcean[r] = r_elevation[r] <= 0 ? 1 : 0;
+
+    // Collect and sort land cells by descending elevation so that when we
+    // process cell i its downstream target has not yet been processed —
+    // guaranteeing all upstream contributions arrive before we pass them on.
+    const landCells = [];
+    for (let r = 0; r < N; r++) if (!r_isOcean[r]) landCells.push(r);
+    landCells.sort((a, b) => r_elevation[b] - r_elevation[a]);
+
+    // Build steepest-descent drain targets (−1 for pits / ocean drains)
+    const drainTarget = new Int32Array(N).fill(-1);
+    for (let i = 0; i < landCells.length; i++) {
+        const r = landCells[i];
+        const h = r_elevation[r];
+        let bestNb = -1, bestDrop = 0;
+        for (let j = adjOffset[r]; j < adjOffset[r + 1]; j++) {
+            const nb = adjList[j];
+            const drop = h - r_elevation[nb];
+            if (drop > bestDrop) { bestDrop = drop; bestNb = nb; }
+        }
+        drainTarget[r] = bestNb; // −1 if isolated pit (rare after priority-flood)
+    }
+
+    // Accumulate flow downstream in high-to-low order
+    const r_flow = new Float32Array(N);
+    for (let r = 0; r < N; r++) if (!r_isOcean[r]) r_flow[r] = 1;
+
+    for (let i = 0; i < landCells.length; i++) {
+        const r = landCells[i];
+        const t = drainTarget[r];
+        if (t >= 0) r_flow[t] += r_flow[r];
+    }
+
+    // Ensure ocean cells stay at 0 (they may have received spillover above)
+    for (let r = 0; r < N; r++) if (r_isOcean[r]) r_flow[r] = 0;
+
+    return r_flow;
+}

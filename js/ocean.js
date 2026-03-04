@@ -2,7 +2,6 @@
 // Wind belts drive zonal currents; continental shelves deflect them into gyres.
 // Warmth is classified geographically: western coasts = warm, eastern coasts = cold.
 
-console.log('[ocean.js] Module loaded');
 import { smoothstep } from './wind.js';
 import { makeItczLookup, percentile } from './climate-util.js';
 
@@ -202,7 +201,6 @@ function smoothOcean(mesh, field, r_isOcean, passes) {
  * @returns {object} current vectors, warmth, and speed arrays for both seasons
  */
 export function computeOceanCurrents(mesh, r_xyz, r_elevation, windResult, params = null) {
-    console.log('[ocean.js] computeOceanCurrents called, numRegions:', mesh.numRegions);
     const numRegions = mesh.numRegions;
 
     // No liquid ocean — skip all current simulation
@@ -256,13 +254,51 @@ export function computeOceanCurrents(mesh, r_xyz, r_elevation, windResult, param
     t0 = performance.now();
     const circumpolarNH = hasCircumpolarChannel(r_lat, r_lon, r_isOcean, numRegions, 60 * DEG, 5 * DEG);
     const circumpolarSH = hasCircumpolarChannel(r_lat, r_lon, r_isOcean, numRegions, -60 * DEG, 5 * DEG);
-    console.log(`[ocean.js] Circumpolar: NH=${circumpolarNH}, SH=${circumpolarSH}`);
     timing.push({ stage: 'Ocean: circumpolar detection', ms: performance.now() - t0 });
 
     // Coast influence threshold
     const coastThreshold = Math.max(5, Math.round(Math.sqrt(numRegions) * 0.035));
     // Warmth fade range — extends beyond coast deflection zone
     const warmthRange = coastThreshold * 2;
+
+    // Build latitude-binned zonal wind averages from the simulated wind output.
+    // 36 bins × 5° from −90° to +90°, ocean cells only. Drives the base zonal
+    // flow direction in Step 3 instead of hardcoded Earth-like latitude bands,
+    // so axial tilt and alien atmospheric pressures genuinely shift ocean gyres.
+    // Falls back to null (→ hardcoded bands) when wind vectors are absent (e.g. main-thread fallback path).
+    const NUM_LAT_BINS = 36;
+    const LAT_BIN_SIZE = Math.PI / NUM_LAT_BINS; // 5° in radians
+    const hasWindVectors = !!(windResult.r_wind_east_summer && windResult.r_wind_east_winter);
+
+    function buildZonalBins(r_windEast) {
+        const binSum = new Float64Array(NUM_LAT_BINS);
+        const binCnt = new Int32Array(NUM_LAT_BINS);
+        for (let r = 0; r < numRegions; r++) {
+            if (!r_isOcean[r]) continue;
+            const bin = Math.min(NUM_LAT_BINS - 1,
+                Math.floor((r_lat[r] + Math.PI / 2) / LAT_BIN_SIZE));
+            binSum[bin] += r_windEast[r];
+            binCnt[bin]++;
+        }
+        const avg = new Float32Array(NUM_LAT_BINS);
+        for (let b = 0; b < NUM_LAT_BINS; b++) {
+            avg[b] = binCnt[b] > 0 ? binSum[b] / binCnt[b] : 0;
+        }
+        // Two-pass Gaussian smoothing to reduce bin-edge artifacts
+        const sm = new Float32Array(NUM_LAT_BINS);
+        for (let b = 0; b < NUM_LAT_BINS; b++) {
+            const bm = Math.max(0, b - 1), bp = Math.min(NUM_LAT_BINS - 1, b + 1);
+            sm[b] = (avg[bm] + avg[b] * 2 + avg[bp]) / 4;
+        }
+        const sm2 = new Float32Array(NUM_LAT_BINS);
+        for (let b = 0; b < NUM_LAT_BINS; b++) {
+            const bm = Math.max(0, b - 1), bp = Math.min(NUM_LAT_BINS - 1, b + 1);
+            sm2[b] = (sm[bm] + sm[b] * 2 + sm[bp]) / 4;
+        }
+        return sm2;
+    }
+    const zonalBinsSummer = hasWindVectors ? buildZonalBins(windResult.r_wind_east_summer) : null;
+    const zonalBinsWinter = hasWindVectors ? buildZonalBins(windResult.r_wind_east_winter) : null;
 
     const result = {};
     const seasons = [
@@ -294,26 +330,38 @@ export function computeOceanCurrents(mesh, r_xyz, r_elevation, windResult, param
             const itczLat = itczLookup(lon);
             const distFromItcz = Math.abs(lat - itczLat) / DEG;
 
-            // Step 3: Base zonal flow from wind band (using shifted boundaries)
+            // Step 3: Base zonal flow — driven by latitude-binned wind field if available,
+            // otherwise fall back to hardcoded Earth-like pressure-band pattern.
+            // The ITCZ equatorial countercurrent is always handled as a special case.
             let baseE;
+            const zonalBins = name === 'summer' ? zonalBinsSummer : zonalBinsWinter;
             if (distFromItcz < 3) {
-                // ITCZ zone: eastward countercurrent at center, blends to westward at edges
+                // ITCZ equatorial countercurrent: convergence piles surface waters eastward
                 baseE = 1 - 2 * smoothstep(0, 3, distFromItcz);
-            } else if (bandLatDeg < 30) {
-                // Trade winds: westward
-                baseE = -1;
-            } else if (bandLatDeg < 35) {
-                // Subtropical transition: blend trades → westerlies
-                baseE = -1 + 2 * smoothstep(30, 35, bandLatDeg);
-            } else if (bandLatDeg < 58) {
-                // Ferrel cell / westerlies: eastward
-                baseE = 1;
-            } else if (bandLatDeg < 65) {
-                // Subpolar transition: blend westerlies → polar easterlies
-                baseE = 1 - 1.5 * smoothstep(58, 65, bandLatDeg);
+            } else if (hasWindVectors && zonalBins) {
+                // Wind-driven: look up this latitude's average zonal wind from the simulation.
+                // Builds physically correct gyres for any axial tilt or alien circulation.
+                const bin = Math.min(NUM_LAT_BINS - 1,
+                    Math.floor((lat + Math.PI / 2) / LAT_BIN_SIZE));
+                baseE = zonalBins[bin];
             } else {
-                // Polar easterlies: weak westward
-                baseE = -0.5;
+                // Fallback: hardcoded Earth-like latitude bands (wind vectors absent)
+                if (bandLatDeg < 30) {
+                    // Trade winds: westward
+                    baseE = -1;
+                } else if (bandLatDeg < 35) {
+                    // Subtropical transition: blend trades → westerlies
+                    baseE = -1 + 2 * smoothstep(30, 35, bandLatDeg);
+                } else if (bandLatDeg < 58) {
+                    // Ferrel cell / westerlies: eastward
+                    baseE = 1;
+                } else if (bandLatDeg < 65) {
+                    // Subpolar transition: blend westerlies → polar easterlies
+                    baseE = 1 - 1.5 * smoothstep(58, 65, bandLatDeg);
+                } else {
+                    // Polar easterlies: weak westward
+                    baseE = -0.5;
+                }
             }
 
             currentE[r] = baseE;
