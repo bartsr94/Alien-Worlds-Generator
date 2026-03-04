@@ -76,6 +76,20 @@ After any code change that adds a new full-disc globe visual effect (something v
 
 Existing example: `hazeMesh`/`updateHazeLayer` (full-disc atmospheric haze opacity, r=1.01 sphere, driven by `params.hazeOpacity` + `params.atmosphereTint`).
 
+After any code change that adds a new alien (X) Köppen zone, follow the **`koppen.js` alien zone pattern**. Alien zones use 2-letter codes starting with `X` (to avoid conflict with standard Köppen `A/B/C/D/E` bands) and are checked at the top of the per-cell classification loop, before any standard band logic.
+
+1. **Add to `KOPPEN_CLASSES`** at the bottom of the array in `js/koppen.js` (after `EF`, together with the other X zones). Each entry needs `{ code, name, color [r,g,b 0–1] }`.
+2. **Add a gate in the classification loop** in `classifyKoppen()`, in the alien zone block just before the `// "Shoulder-month"` comment. Gates must check physical °C thresholds (using the already-decoded `Ts`/`Tw`/`Tann`/`Thot`) and precipitation (use `(pSummer[r] + pWinter[r]) * 1000` for annual mm proxy). Order matters: hotter zones first (XV before XS), colder zones last.
+3. **Add to `BIOME_COLORS`** in `js/color-map.js` with a satellite-view color matching the zone's visual character.
+4. **Add a case to `altitudeThresholds()`** in `js/color-map.js`. Use very high alpine/snow lines (e.g. `[4.0, 99.0]`) for hot zones so snow never appears; use low snow lines (e.g. `[0.0, 0.1]`) for deep-freeze zones.
+5. **Thresholds must be set well outside Earth's climate range** so terrestrial worlds are unaffected. Earth's surface temperatures stay within roughly −45 to +45°C; any X-zone threshold should be comfortably beyond that (current outermost Earth thresholds: `Thot < 0` for EF, `Tann ≥ 18` for BWh).
+6. **No ID remapping needed** — `CODE_TO_ID` is built at import time by iterating `KOPPEN_CLASSES`, so new entries at the end get the next integer ID automatically.
+7. **Update README.md** (zone count in Visual Options and the pipeline step 16 description), **`llms.txt`**, and **`sitemap.xml` `<lastmod>`**.
+
+Existing X zones (IDs 31–35): `XD` Cryo-Desert (Thot < −30°C, dry), `XF` Deep Freeze (Thot < −30°C, wet), `XP` Primordial (Tann > 70°C, Pann > 400 mm), `XS` Scorched (Tann > 70°C, dry), `XV` Hellscape (Tann > 250°C).
+
+**Note:** Purely visual sub-variants within one zone (e.g. Europa-ice vs frost-world vs standard ice under `EF`/`XF`) should be handled in `color-map.js` palette functions using the `_hydrosphere`/`_baseTemp` module-level state, not as separate Köppen codes. Reserve new X codes for cases where the climate regime itself is meaningfully distinct (different precipitation regime, different aridity character, etc.).
+
 After any code change that adds, removes, or modifies slider controls, update the planet code encoding in `js/planet-code.js` to match. The planet code packs the seed and all slider values into a compact base36 string using mixed-radix integer packing. If a slider's range, step, or count changes, or if a new slider is added, update:
 
 - The `SLIDERS` array (min, step, count for each slider)

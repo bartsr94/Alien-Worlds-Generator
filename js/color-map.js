@@ -70,6 +70,12 @@ const BIOME_COLORS = [
     [0.05, 0.18, 0.07],         // 28 Dwd  Extremely cold subarctic monsoon
     [0.35, 0.32, 0.22],         // 29 ET   Tundra — earthy brown (sparse moss/lichen on rock)
     [0.78, 0.80, 0.84],         // 30 EF   Ice cap — blue-tinted white
+    // Alien (X) zones — outside Earth's temperature envelope
+    [0.60, 0.60, 0.70],         // 31 XD   Cryo-Desert — lavender-gray frozen wasteland
+    [0.75, 0.86, 0.98],         // 32 XF   Deep Freeze — icy blue-white cryogenic world
+    [0.22, 0.44, 0.28],         // 33 XP   Primordial — murky swamp-green hot+wet archean world
+    [0.82, 0.28, 0.08],         // 34 XS   Scorched — burnt deep orange extreme heat, dry
+    [0.46, 0.06, 0.04],         // 35 XV   Hellscape — dark crimson supercritical world
 ];
 
 // Rocky/alpine mountain color for high-elevation blending.
@@ -88,7 +94,12 @@ function altitudeThresholds(classId) {
         classId === 25 || classId === 26) return [1.5, 3.0];  // Continental humid (D*a, D*b)
     if (classId <= 28) return [0.8, 2.0];       // Subarctic (D*c, D*d)
     if (classId === 29) return [0.4, 1.5];      // Tundra (ET) — rocky higher up, snow only at peaks
-    return [0, 0.5];                             // Ice cap (EF)
+    if (classId === 30) return [0.0, 0.5];       // Ice cap (EF)
+    if (classId === 31) return [1.0, 2.5];       // Cryo-Desert (XD) — dry cold, snow at moderate altitude
+    if (classId === 32) return [0.0, 0.1];       // Deep Freeze (XF) — permanent ice everywhere
+    if (classId === 33) return [2.5, 99.0];      // Primordial (XP) — hot+wet, snow only at extreme altitude
+    if (classId >= 34)  return [4.0, 99.0];      // Scorched / Hellscape (XS, XV) — no snow possible
+    return [0, 0.5];                             // fallback
 }
 
 // ---------------------------------------------------------------------------

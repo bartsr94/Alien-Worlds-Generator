@@ -48,6 +48,12 @@ export const KOPPEN_CLASSES = [
     { code: 'Dwd',    name: 'Extremely cold subarctic (monsoon)', color: [0.20, 0.00, 0.53] },  // #320087
     { code: 'ET',     name: 'Tundra',                             color: [0.70, 0.70, 0.70] },  // #B2B2B2
     { code: 'EF',     name: 'Ice cap',                            color: [0.41, 0.41, 0.41] },  // #686868
+    // ── Alien (X) zones — outside Earth's temperature envelope ──
+    { code: 'XD',     name: 'Cryo-Desert',                        color: [0.60, 0.60, 0.70] },  // lavender-gray frozen wasteland
+    { code: 'XF',     name: 'Deep Freeze',                        color: [0.75, 0.86, 0.98] },  // icy blue-white cryogenic world
+    { code: 'XP',     name: 'Primordial',                         color: [0.22, 0.44, 0.28] },  // murky swamp-green hot+wet archean
+    { code: 'XS',     name: 'Scorched',                           color: [0.82, 0.28, 0.08] },  // burnt deep orange extreme heat, dry
+    { code: 'XV',     name: 'Hellscape',                          color: [0.46, 0.06, 0.04] },  // dark crimson supercritical world
 ];
 
 // Lookup table: KOPPEN_CLASSES code → ID (built once at import time)
@@ -60,7 +66,9 @@ KOPPEN_CLASSES.forEach((c, i) => { CODE_TO_ID[c.code] = i; });
  *
  * @param {object}       mesh         - SphereMesh
  * @param {Float32Array}  r_elevation  - per-region elevation (<=0 = ocean)
- * @param {object}        tempResult   - { r_temperature_summer, r_temperature_winter } (0-1 → -45..+45 C)
+ * @param {object}        tempResult   - { r_temperature_summer, r_temperature_winter, tempScaleMin, tempScaleMax }
+ *                                       Normalised [0,1] temperatures; tempScaleMin/Max give the physical °C range
+ *                                       for this planet (supplied by temperature.js).
  * @param {object}        precipResult - { r_precip_summer, r_precip_winter } (0-1 p95-normalized)
  * @returns {Uint8Array}  r_koppen     - per-region class ID (index into KOPPEN_CLASSES)
  */
@@ -73,6 +81,12 @@ export function classifyKoppen(mesh, r_elevation, tempResult, precipResult) {
     const pSummer = precipResult.r_precip_summer;
     const pWinter = precipResult.r_precip_winter;
 
+    // Physical temperature scale for this planet (provided by temperature.js).
+    // Earth defaults: T_MIN=-45, T_MAX=+45.  Alien worlds can range far outside.
+    const T_MIN   = tempResult.tempScaleMin ?? -45;
+    const T_MAX   = tempResult.tempScaleMax ??  45;
+    const T_RANGE = Math.max(1, T_MAX - T_MIN);
+
     for (let r = 0; r < n; r++) {
         // ── Ocean ──
         if (r_elevation[r] <= 0) {
@@ -81,12 +95,26 @@ export function classifyKoppen(mesh, r_elevation, tempResult, precipResult) {
         }
 
         // ── Convert normalised values to physical units ──
-        // Ts/Tw are NH summer/winter proxies — NOT necessarily local warm/cold
-        const Ts = -45 + Math.max(0, Math.min(1, tSummer[r])) * 90;
-        const Tw = -45 + Math.max(0, Math.min(1, tWinter[r])) * 90;
+        // Ts/Tw are NH summer/winter proxies — NOT necessarily local warm/cold.
+        // Use the planetary-scale T_MIN/T_RANGE so that alien worlds decode at
+        // physically correct temperatures instead of always mapping to [-45,+45]°C.
+        const Ts = T_MIN + Math.max(0, Math.min(1, tSummer[r])) * T_RANGE;
+        const Tw = T_MIN + Math.max(0, Math.min(1, tWinter[r])) * T_RANGE;
         const Thot  = Math.max(Ts, Tw);   // warmest month proxy (°C)
         const Tcold = Math.min(Ts, Tw);    // coldest month proxy (°C)
         const Tann  = (Ts + Tw) / 2;
+
+        // ── Alien zones: outside Earth's temperature envelope ──
+        // These gates fire before any Köppen band logic. Thresholds are in
+        // physical °C and are intentionally set well beyond Earth's climate range
+        // so terrestrial worlds are unaffected.
+        if (Tann  > 250) { r_koppen[r] = CODE_TO_ID['XV']; continue; }  // Hellscape: supercritical / Venus-class
+        if (Tann  >  70 && (pSummer[r] + pWinter[r]) * 1000 > 400)
+                         { r_koppen[r] = CODE_TO_ID['XP']; continue; }  // Primordial: hot + wet (archean, steam-jungle)
+        if (Tann  >  70) { r_koppen[r] = CODE_TO_ID['XS']; continue; }  // Scorched: extreme heat, dry
+        if (Thot  < -30 && (pSummer[r] + pWinter[r]) * 1000 < 80)
+                         { r_koppen[r] = CODE_TO_ID['XD']; continue; }  // Cryo-Desert: frozen AND dry
+        if (Thot  < -30) { r_koppen[r] = CODE_TO_ID['XF']; continue; }  // Deep Freeze: cryogenic
 
         // "Shoulder-month" temperature: approximate the temp 2 months before
         // peak summer.  With only 2 seasons we interpolate 2/6 of the way from
@@ -173,7 +201,10 @@ export function classifyKoppen(mesh, r_elevation, tempResult, precipResult) {
         } else {
             Pthresh = 20 * Tann + 140;
         }
-        Pthresh = Math.max(0, Pthresh);
+        // Clamp: prevent zero/negative threshold on very cold worlds (would
+        // make nothing arid ever) and cap on extreme-hot worlds (would demand
+        // thousands of mm before anything counts as B-type).
+        Pthresh = Math.max(50, Math.min(3500, Pthresh));
 
         if (Pann < Pthresh) {
             const isHot = Tann >= 18;  // standard Köppen: h if mean annual temp >= 18°C
