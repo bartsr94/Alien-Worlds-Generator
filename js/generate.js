@@ -2,14 +2,14 @@
 // synchronous main-thread generation if module workers aren't supported.
 
 import Delaunator from 'delaunator';
-import { setDelaunator, SphereMesh } from './sphere-mesh.js';
-import { computePlateColors, buildMesh } from './planet-mesh.js';
-import { state } from './state.js';
-import { detailFromSlider } from './detail-scale.js';
-import { computeOceanCurrents } from './ocean.js';
-import { computePrecipitation } from './precipitation.js';
-import { computeTemperature } from './temperature.js';
-import { classifyKoppen } from './koppen.js';
+import { setDelaunator, SphereMesh } from './sim/sphere-mesh.js';
+import { computePlateColors, buildMesh } from './render/planet-mesh.js';
+import { state } from './core/state.js';
+import { detailFromSlider } from './core/detail-scale.js';
+import { computeOceanCurrents } from './sim/ocean.js';
+import { computePrecipitation } from './sim/precipitation.js';
+import { computeTemperature } from './sim/temperature.js';
+import { classifyKoppen } from './sim/koppen.js';
 
 // Main thread still needs Delaunator for SphereMesh reconstruction
 setDelaunator(Delaunator);
@@ -731,18 +731,18 @@ let _fallbackModules = null;
 async function loadFallback() {
     if (_fallbackModules) return _fallbackModules;
     const [rng, simplex, sphere, plates, ocean, elev, post, wind, oceanCurrents, precip, temp, coarsePlates] = await Promise.all([
-        import('./rng.js'),
-        import('./simplex-noise.js'),
-        import('./sphere-mesh.js'),
-        import('./plates.js'),
-        import('./ocean-land.js'),
-        import('./elevation.js'),
-        import('./terrain-post.js'),
-        import('./wind.js'),
-        import('./ocean.js'),
-        import('./precipitation.js'),
-        import('./temperature.js'),
-        import('./coarse-plates.js')
+        import('./core/rng.js'),
+        import('./core/simplex-noise.js'),
+        import('./sim/sphere-mesh.js'),
+        import('./sim/plates.js'),
+        import('./sim/ocean-land.js'),
+        import('./sim/elevation.js'),
+        import('./sim/terrain-post.js'),
+        import('./sim/wind.js'),
+        import('./sim/ocean.js'),
+        import('./sim/precipitation.js'),
+        import('./sim/temperature.js'),
+        import('./sim/coarse-plates.js')
     ]);
     _fallbackModules = { rng, simplex, sphere, plates, ocean, elev, post, wind, oceanCurrents, precip, temp, coarsePlates };
     return _fallbackModules;

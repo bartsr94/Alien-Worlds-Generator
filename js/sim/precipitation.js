@@ -4,7 +4,7 @@
 
 import { smoothstep } from './wind.js';
 import { computeGradients } from './wind.js';
-import { elevToHeightKm } from './color-map.js';
+import { elevToHeightKm } from '../render/color-map.js';
 import { computeHeuristicPrecipitation, computeHeuristicWindField } from './heuristic-precip.js';
 import { smoothField, makeItczLookup, percentile } from './climate-util.js';
 

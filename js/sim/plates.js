@@ -1,7 +1,7 @@
 // Plate generation — round-robin weighted fill with directional bias.
 // Each plate gets a random growth rate and preferred direction.
 
-import { makeRng, makeRandInt } from './rng.js';
+import { makeRng, makeRandInt } from '../core/rng.js';
 
 export function generatePlates(mesh, r_xyz, numPlates, seed) {
     const { numRegions } = mesh;

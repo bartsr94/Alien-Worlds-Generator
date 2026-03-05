@@ -17,7 +17,7 @@
 //   Crater depth is defined in elevation units (0–1 approx scale matching the
 //   mesh conventions) so no per-resolution tuning is needed.
 
-import { makeRng } from './rng.js';
+import { makeRng } from '../core/rng.js';
 
 // ---------------------------------------------------------------------------
 // Crater profile — single cell at normalised distance t = d / radius

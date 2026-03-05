@@ -269,38 +269,56 @@ CNAME                   Custom domain config (orogen.studio)
 404.html                Custom 404 page
 preview.png             Social preview image (og:image / Twitter card)
 js/
-  main.js               Entry point — UI wiring, animation loop, solar system wiring
-  state.js              Shared mutable application state
-  solar-system.js       Solar system body definitions (OUR_SOLAR_SYSTEM) and procedural system generator (generateSystem)
-  system-storage.js     Solar system persistence — localStorage CRUD for system registry, body param overrides, and generation history
-  game-clock.js         Compressed game-time clock — speed levels, Julian Day calendar, pause/resume
-  orrery.js             2D top-down orrery — Kepler orbit solver, Three.js orbit rings and body meshes, HTML label overlay, raycasting
-  system-planet-params.js  Adapter bridging solar system body params to planet-generator slider values
+  main.js               Entry point — UI wiring, animation loop
   generate.js           Worker dispatcher — posts jobs, handles results
   planet-worker.js      Web Worker — runs geology pipeline off main thread
-  planet-code.js        Planet code encode/decode (seed + sliders → base36)
-  planetary-params.js   Planetary Physics parameter builder — derives all simulation constants from the five physics sliders
-  rng.js                Seeded PRNG (Park-Miller LCG)
-  simplex-noise.js      3D Simplex noise with fBm and ridged fBm
-  color-map.js          Elevation → RGB colour mapping + satellite biome palettes (earth / arid / ice / alien / barren), each with temperature- and hydrosphere-driven sub-variants
-  sphere-mesh.js        Fibonacci sphere, Delaunay, SphereMesh dual-mesh
-  plates.js             Tectonic plate generation (farthest-point seeding, round-robin flood fill, compactness constraints)
-  coarse-plates.js      Resolution-independent plate pipeline — coarse reference grid, projection, boundary smoothing
-  ocean-land.js         Ocean/land assignment with continent seeding
-  elevation.js          Collisions, stress propagation, distance fields, elevation
-  terrain-post.js       Domain warping, bilateral smoothing, glacial/hydraulic/thermal erosion, ridge sharpening, soil creep, hypsometric correction
-  impact-craters.js     Procedural impact crater generation for airless/trace-atmosphere worlds (power-law distribution, bowl+rim+ejecta profiles)
-  climate-util.js       Shared climate utilities — smoothing, ITCZ lookup, percentile selection
-  wind.js               Seasonal wind simulation — pressure fields, ITCZ tracking, Coriolis wind
-  ocean.js              Ocean surface currents — rule-based wind-belt gyres, coast BFS, circumpolar detection
-  precipitation.js      Precipitation simulation — moisture advection, ITCZ/frontal/orographic effects, blended with heuristic
-  heuristic-precip.js   Heuristic zonal precipitation model — smooth latitude/continentality/orographic patterns
-  temperature.js        Temperature simulation — ITCZ thermal equator, lapse rate, continentality, ocean currents
-  koppen.js             Köppen climate classification — alien-temperature-aware; 30 standard types + 5 alien (X) zones (XD Cryo-Desert, XF Deep Freeze, XP Primordial, XS Scorched, XV Hellscape), temperature decoded at planet's actual thermal range
-  scene.js              Three.js scene, cameras, controls, lights
-  planet-mesh.js        Voronoi mesh, map projection, hover highlight, selection highlight (gold tint on clicked tile)
   edit-mode.js          Ctrl-click plate toggle, hover info card, tile detail panel (click-to-open, draggable, close-on-outside)
-  detail-scale.js       Non-linear (power-curve) detail slider mapping
+  solar-ui.js           Solar system UI — orrery interaction, body list, saved systems panel, clock controls, system entry/exit, background generation queue
+  orrery.js             2D top-down orrery — Kepler orbit solver, Three.js orbit rings and body meshes, HTML label overlay, raycasting
+  game-clock.js         Compressed game-time clock — speed levels, Julian Day calendar, pause/resume
+
+  core/                 Pure utilities — no game logic, no external deps
+    state.js            Shared mutable application state
+    rng.js              Seeded PRNG (Park-Miller LCG)
+    simplex-noise.js    3D Simplex noise with fBm and ridged fBm
+    detail-scale.js     Non-linear (power-curve) detail slider mapping
+
+  world/                World data and configuration — no simulation deps
+    planetary-params.js Planetary Physics parameter builder — derives all simulation constants from the five physics sliders
+    planet-code.js      Planet code encode/decode (seed + sliders → base36)
+    solar-system.js     Solar system body definitions (OUR_SOLAR_SYSTEM) and procedural system generator (generateSystem)
+    system-planet-params.js  Adapter bridging solar system body params to planet-generator slider values
+    system-storage.js   Solar system persistence — localStorage CRUD for system registry, body param overrides, and generation history
+
+  viz-controls.js       Visualization layer switching, legend rendering, and build overlay
+
+  sim/                  Simulation pipeline — geology, climate, tectonics
+    sphere-mesh.js      Fibonacci sphere, Delaunay, SphereMesh dual-mesh
+    coarse-plates.js    Resolution-independent plate pipeline — coarse reference grid, projection, boundary smoothing
+    plates.js           Tectonic plate generation (farthest-point seeding, round-robin flood fill, compactness constraints)
+    ocean-land.js       Ocean/land assignment with continent seeding
+    elevation.js        Collisions, stress propagation, distance fields, elevation
+    terrain-post.js     Domain warping, bilateral smoothing, soil creep, hypsometric correction, ridge sharpening; re-exports erosion.js
+    erosion.js          Priority-flood pit carving and composite hydraulic/thermal/glacial erosion
+    impact-craters.js   Procedural impact crater generation for airless/trace-atmosphere worlds (power-law distribution, bowl+rim+ejecta profiles)
+    climate-util.js     Shared climate utilities — smoothing, ITCZ lookup, percentile selection
+    wind.js             Seasonal wind simulation — pressure fields, ITCZ tracking, Coriolis wind
+    ocean.js            Ocean surface currents — rule-based wind-belt gyres, coast BFS, circumpolar detection
+    precipitation.js    Precipitation simulation — moisture advection, ITCZ/frontal/orographic effects, blended with heuristic
+    heuristic-precip.js Heuristic zonal precipitation model — smooth latitude/continentality/orographic patterns
+    temperature.js      Temperature simulation — ITCZ thermal equator, lapse rate, continentality, ocean currents
+    koppen.js           Köppen climate classification — alien-temperature-aware; 30 standard types + 5 alien (X) zones (XD Cryo-Desert, XF Deep Freeze, XP Primordial, XS Scorched, XV Hellscape)
+
+  render/               Three.js rendering — scene, mesh construction, color mapping
+    scene.js            Three.js scene, cameras, controls, lights
+    color-map.js        Elevation → RGB colour mapping + satellite biome palettes (earth / arid / ice / alien / barren)
+    planet-mesh.js      Voronoi mesh, map projection; re-exports highlights, arrows, export
+    mesh-colors.js      All per-region color-mapping functions (27+ layers) + biome smoothing cache
+    mesh-highlights.js  Hover, Köppen hover, and tile selection color-buffer highlights
+    mesh-arrows.js      Wind direction arrows, ocean current arrows, and drift arrow cleanup
+    mesh-export.js      High-resolution equirectangular PNG export with tiled rendering and sRGB correction
+
+  plans/                Design documents and feature plans
 ```
 
 ## Dependencies

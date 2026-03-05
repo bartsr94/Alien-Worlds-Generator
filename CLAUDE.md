@@ -4,6 +4,8 @@
 
 Heliosphere — a browser-based procedural planet generator using Three.js and ES modules with no build step.
 
+> For a detailed architectural overview, data flow diagrams, and module descriptions, see `docs/ARCHITECTURE.md`.
+
 ## Guiding Principles
 
 All three tenets should be considered simultaneously. When they conflict, break ties in this order:
@@ -46,6 +48,8 @@ After any code change to simulation or climate code, ensure **scale invariance**
 - **Thresholds in physical units** (degrees latitude, km altitude, °C, mm precipitation) are inherently scale-invariant and do NOT need scaling — e.g. "28° from ITCZ" or "heightKm > 1.5" are fine at any resolution.
 - When in doubt, ask: "if I double numRegions, does this value change meaning?" If yes, it needs scaling.
 
+*→ See `docs/ARCHITECTURE.md` § Scale Invariance for a concise summary of these rules.*
+
 After any code change that adds, removes, or modifies features, check whether the SEO and AISEO files need updating. The project has several files that describe the app to search engines and AI models. These must stay accurate — outdated claims are worse than no claims. If a change adds, removes, or modifies any of the following, update the relevant files:
 
 - **`index.html` `<head>` meta tags** — The `<title>`, `description`, `og:description`, `twitter:description`, and `keywords` meta tags describe what the app does. Update if core capabilities change (e.g. new simulation type, new export format, new interaction mode).
@@ -73,6 +77,8 @@ const _rp_hydro = state.planetaryParams?.hydrosphere ?? 3;
 const riversPlausible = _rp_hydro >= 1 && _rp_temp > -30 && _rp_temp < 130;
 ```
 
+*→ See `docs/ARCHITECTURE.md` § `js/render/color-map.js — Planetary Rendering State` for a module-level overview.*
+
 After any code change that adds a new full-disc globe visual effect (something visible across the whole planet face, not just the rim), follow the **`scene.js` globe layer pattern**:
 
 1. Create a new `THREE.Mesh` with a `THREE.SphereGeometry` at radius slightly above the terrain sphere (the water sphere is at r=1.0, the haze is at r=1.01, the atmosphere rim is at r=1.12 — pick the appropriate layer)
@@ -82,6 +88,8 @@ After any code change that adds a new full-disc globe visual effect (something v
 5. Add the corresponding derived value to `js/planetary-params.js` using the established helper pattern
 
 Existing example: `hazeMesh`/`updateHazeLayer` (full-disc atmospheric haze opacity, r=1.01 sphere, driven by `params.hazeOpacity` + `params.atmosphereTint`).
+
+*→ See `docs/ARCHITECTURE.md` § `js/render/scene.js — Globe Layer Stack` for the full layer radius table.*
 
 After any code change that adds or modifies the tile detail panel (click-to-inspect interaction), be aware of the **tile panel architecture**:
 
@@ -94,6 +102,8 @@ After any code change that adds or modifies the tile detail panel (click-to-insp
 - **Draggable header**: drag logic is attached per-panel in `showTilePanel()` using per-call `pointermove`/`pointerup` listeners on `document` that are cleaned up on drag-end.
 - **Mobile**: the tile panel is intentionally desktop-only. The `tileDown` tracking only starts when `!state.isTouchDevice`.
 - **generate-done cleanup**: `main.js` calls `hideTilePanel()` + `clearSelectionHighlight()` on every non-background-generation `generate-done` event.
+
+*→ See `docs/ARCHITECTURE.md` § `js/edit-mode.js — Tile Interaction` for a higher-level description.*
 
 After any code change that adds a new alien (X) Köppen zone, follow the **`koppen.js` alien zone pattern**. Alien zones use 2-letter codes starting with `X` (to avoid conflict with standard Köppen `A/B/C/D/E` bands) and are checked at the top of the per-cell classification loop, before any standard band logic.
 
@@ -126,10 +136,105 @@ After any code change that adds or modifies solar system features, be aware of t
 
 **What is and is NOT persisted:** Only the five physics slider overrides (`gravity, atmosphere, hydrosphere, baseTemp, axialTilt`) are saved to localStorage. `curData` (terrain typed arrays) is intentionally not persisted — too large. Bodies re-generate on page reload but with their saved slider values applied.
 
-**Key call sites in `main.js`:**
+**Key call sites in `js/solar-ui.js`:**
 - `enterSystemMode()` — call `upsertSystem(record)` (preserve existing `bodyOverrides`/`generatedBodyIds`) then `setActiveSystemId(id)` then `renderSavedSystemsList()`
 - `enterBody()` — call `getBodyOverride(systemId, bodyId)` in both cache-hit and cache-miss paths and layer onto base params
 - `generate-done` body handler — call `markBodyGenerated()`, then `saveBodyOverride()`/`clearBodyOverride()` based on slider diff vs `body.params`, then `renderSavedSystemsList()`
-- Page-load restore — use `window._enterSystemMode` (exposed inside the `initSolarSystem()` IIFE) since page-load code runs outside that IIFE scope
+- Page-load restore — use `window._enterSystemMode` (exposed by `initSolarSystem()` in `js/solar-ui.js`) since `main.js` page-load code runs after module initialization
 
-**`generate-done` guard:** Both top-level `generate-done` listeners (outside the solar system IIFE) must check `if (state.isBgGenerating || state.currentSystem) return` to avoid running standalone-planet code during solar body generation.
+**`generate-done` guard:** Both top-level `generate-done` listeners in `main.js` must check `if (state.isBgGenerating || state.currentSystem) return` to avoid running standalone-planet code during solar body generation. The solar-body `generate-done` listener lives in `js/solar-ui.js` and handles caching and queue advancement.
+
+*→ See `docs/ARCHITECTURE.md` § `js/solar-ui.js — Solar System Mode` for a higher-level description and persistence rationale.*
+
+After any code change that modifies how visualization layers are switched or how mesh colors are rebuilt, be aware of the **visualization switching lifecycle**:
+
+1. User clicks a map tab, the Inspect dropdown, or the mobile view switcher
+2. `switchVisualization(layer)` is called — if the layer requires climate data (`CLIMATE_LAYERS` set) and climate hasn't been computed yet, it triggers `computeClimateViaWorker()` first, then falls through to `applyLayer(layer)` on completion
+3. `applyLayer(layer)` does three things in order:
+   - Sets `state.debugLayer = layer` and calls `updateMeshColors()` — this recolors all globe + map vertex buffers without rebuilding geometry
+   - Toggles wind/ocean arrow visibility: wind layers show `buildWindArrows(season)`, ocean layers show `buildOceanCurrentArrows(season)`, all other layers call both with `null` to hide
+   - Calls `updateLegend(layer)` to rebuild the color legend bar
+4. Tab syncing: `syncTabsToLayer(layer)` updates the active tab highlight, the Inspect dropdown value, and the mobile view switcher selection
+
+**`updateMeshColors()` vs `buildMesh()`**: `updateMeshColors()` is the fast path — it reuses existing geometry and only overwrites the `color` attribute buffer on both globe and map meshes. Call it when the visualization layer changes, when biome mode changes, or when the selected tile highlight needs refreshing. Call `buildMesh()` (which internally calls `updateMeshColors()` at the end) only when the terrain data itself has changed (after generate-done, reapply-done, or edit-done). `updateMeshColors()` also re-applies the selection highlight at the end so the gold tile selection survives layer switching.
+
+*→ See `docs/ARCHITECTURE.md` § 2. Visualization Switching for a data flow diagram.*
+
+After any code change that modifies worker communication or adds a new worker command, be aware of the **worker and fallback architecture** in `js/generate.js`:
+
+- **Worker lifecycle**: A single `Worker` instance is created at module load with `type: 'module'`. If module workers aren't supported (Safari, older browsers), `workerSupported` is set to `false` and all generation runs synchronously on the main thread via `generateFallback()`.
+- **Commands**: The worker accepts four commands: `'generate'` (full pipeline), `'reapply'` (terrain post-processing only), `'editRecompute'` (plate toggle + re-elevation), `'computeClimate'` (deferred climate on existing terrain). Each returns a typed response (`'done'`, `'reapplyDone'`, `'editDone'`, `'climateDone'`).
+- **Retained state `W`**: The worker clones essential data (mesh topology, coordinates, plate assignments, pre-erosion elevation) into a module-level `W` object after `'generate'`. Subsequent `'reapply'`/`'editRecompute'`/`'computeClimate'` commands reuse `W` without retransmission. This means the worker must always receive updated values for anything that changed (e.g. `toggledIndices` for edits, `planetaryParams` for reapply).
+- **Zero-copy transfers**: Large typed arrays (`r_xyz`, `r_elevation`, etc.) are transferred to the main thread via `postMessage` transfer lists. The worker keeps its own clones in `W`.
+- **Main-thread climate fallback**: If the worker returns terrain without climate data (e.g. `skipClimate` was set), `generate.js` has `buildWindResultForOcean()` and inline calls to `computeOceanCurrents()`, `computePrecipitation()`, `computeTemperature()`, `classifyKoppen()` that run on the main thread. This path is also used for `'computeClimate'` when workers aren't supported.
+- **Callback pattern**: `generate()` accepts `onProgress(pct, label)` and `onDone()` callbacks stored as module-level `_onProgress`/`_onDone`. These are overwritten each call (not queued).
+
+*→ See `docs/ARCHITECTURE.md` § Worker Architecture for a sequence diagram and retained-state rationale.*
+
+After any code change that adds a new visual layer to the planet globe (e.g. clouds, rings, aurora), be aware of the **globe layer stack** in `js/scene.js`. All layers are concentric spheres at different radii:
+
+| Layer | Radius | Mesh | Material | Update Function | Visibility Rule |
+|-------|--------|------|----------|-----------------|-----------------|
+| Terrain/planet | ≈1.0 (displaced) | `state.planetMesh` | `MeshLambertMaterial` vertex colors | `buildMesh()` / `updateMeshColors()` | Always visible |
+| Water | 1.0 | `waterMesh` | `MeshPhongMaterial` translucent | `updateWaterColor(rgb)` | Hidden when hydrosphere=None (`rgb=null`) |
+| Haze | 1.01 | `hazeMesh` | `ShaderMaterial` (Fresnel limb brightening) | `updateHazeLayer(opacity, rgb)` | Visible for Thick/Crushing/Titan-cold atmospheres |
+| Atmosphere rim | 1.12 | `atmosMesh` | `ShaderMaterial` (rim glow, `pow(r, 3.5)`) | `updateAtmosphereColor(rgb)` | Hidden when atmosphere=None (`rgb=[0,0,0]`) |
+| Stars | 40–70 | `starsMesh` | `PointsMaterial` | None (static) | Always visible in globe view |
+
+New layers should pick a radius that avoids z-fighting with existing layers. All update functions are called from the `generate-done` handler in `main.js` using values from `state.planetaryParams`.
+
+*→ See `docs/ARCHITECTURE.md` § `js/render/scene.js — Globe Layer Stack` for the full layer table with radii and materials.*
+
+After any code change that adds or modifies files in the `js/` directory, be aware of the **module file organization** and subfolder layout:
+
+```
+js/
+  main.js           Entry point — UI wiring, animation loop
+  generate.js       Worker dispatcher — posts jobs, handles results
+  planet-worker.js  Web Worker — runs geology pipeline off main thread
+  edit-mode.js      Ctrl-click plate toggle, hover info card, tile detail panel
+  solar-ui.js       Solar system UI — orrery interaction, body list, saved systems panel, clock controls, system entry/exit, background generation queue
+  orrery.js         2-D top-down orrery — Kepler orbit solver, Three.js meshes
+  game-clock.js     Compressed game-time clock
+
+  core/             Pure utilities — no game logic, no external deps
+    state.js        Shared mutable application state
+    rng.js          Seeded PRNG
+    simplex-noise.js  3-D Simplex noise
+    detail-scale.js   Non-linear detail slider mapping
+
+  world/            World data and configuration — no simulation deps
+    planetary-params.js     Physics parameter builder
+    planet-code.js          Planet code encode/decode
+    solar-system.js         Body definitions + procedural system generator
+    system-planet-params.js Body → slider adapter
+    system-storage.js       Solar system localStorage persistence
+
+  viz-controls.js  Layer switching, legend rendering, build overlay
+
+  sim/              Simulation pipeline — geology, climate, tectonics
+    sphere-mesh.js  coarse-plates.js  plates.js  ocean-land.js
+    elevation.js  terrain-post.js  erosion.js  impact-craters.js
+    climate-util.js  wind.js  ocean.js  precipitation.js
+    heuristic-precip.js  temperature.js  koppen.js
+
+  render/           Three.js rendering — scene, mesh, colors
+    scene.js        Three.js scene, cameras, controls, lights
+    color-map.js    Elevation → RGB, satellite biome palettes
+    planet-mesh.js  Voronoi mesh, map projection, highlights, arrows, export
+    mesh-colors.js  All 27+ per-region color-mapping functions + biome cache
+    mesh-highlights.js  Hover, Köppen hover, and tile selection highlights
+```
+
+Key render module responsibilities:
+
+- **`js/render/planet-mesh.js`** — Globe and map mesh construction, `updateMeshColors()` fast-path color rebuild, plate color computation, grid overlays. Re-exports functions from child modules for backward compatibility.
+- **`js/render/mesh-highlights.js`** — Surgical save/restore color-buffer patches for plate hover, Köppen legend hover, and tile selection. All six highlight functions are re-exported through `planet-mesh.js`.
+- **`js/render/mesh-colors.js`** — All 27+ per-region color mapping functions (elevation, heightmap, precipitation, temperature, Köppen, biome, continentality, ocean current, habitability, hydro state, flow accumulation, etc.) plus the biome smoothing cache. Imported by `planet-mesh.js`.
+- **`js/render/mesh-arrows.js`** — Wind direction arrows, ocean current arrows, and drift arrow cleanup. Handles both globe and map arrow overlays with lat/lon grid sampling for visual clarity. Imported by `planet-mesh.js`.
+- **`js/render/mesh-export.js`** — High-resolution equirectangular PNG export with tiled rendering (max 2048×2048 per tile), sRGB gamma correction, and row-flip. Supports single (`exportMap`) and batch (`exportMapBatch`) export. Imported by `planet-mesh.js`.
+- **`js/viz-controls.js`** — Visualization layer switching (`switchVisualization`, `applyLayer`), tab/mobile-switcher sync (`syncTabsToLayer`), legend rendering (`updateLegend`), build overlay (`onProgress`, `showBuildOverlay`, `hideBuildOverlay`), and the Inspect dropdown element (`debugLayerEl`). Imported by `main.js`.
+- **`js/sim/erosion.js`** — Priority-flood pit carving (`priorityFloodCarve`, private) and composite iterative erosion (`erodeComposite`, exported). Re-exported through `terrain-post.js`.
+- **`js/solar-ui.js`** — Solar system UI: orrery interaction, body list rendering, saved systems panel, clock controls, system creation/entry/exit, background generation queue, and body param overrides. Initialized from `main.js` via `initSolarSystem(config)`.
+
+*→ See `docs/ARCHITECTURE.md` § File Layout for the complete annotated file tree.*

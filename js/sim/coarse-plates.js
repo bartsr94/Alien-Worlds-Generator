@@ -2,9 +2,9 @@
 // Generates plates on a fixed ~20K-region mesh, then projects onto any
 // high-res mesh with FBM noise perturbation for fractal boundaries.
 
-import { makeRng } from './rng.js';
+import { makeRng } from '../core/rng.js';
 import { buildSphere } from './sphere-mesh.js';
-import { SimplexNoise } from './simplex-noise.js';
+import { SimplexNoise } from '../core/simplex-noise.js';
 import { generatePlates } from './plates.js';
 import { assignOceanLand } from './ocean-land.js';
 

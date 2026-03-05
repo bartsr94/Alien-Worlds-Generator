@@ -1,20 +1,20 @@
 // Web Worker — runs the pure computation pipeline off the main thread.
 // Handles: generate, reapply, editRecompute commands.
 
-import { makeRng } from './rng.js';
-import { SimplexNoise } from './simplex-noise.js';
-import { setDelaunator, buildSphere, generateTriangleCenters, SphereMesh, computeNeighborDist } from './sphere-mesh.js';
-import { generateCoarsePlates, projectCoarsePlates } from './coarse-plates.js';
-import { smoothAndReconnectPlates } from './plates.js';
-import { assignElevation } from './elevation.js';
-import { warpTerrain, smoothElevation, erodeComposite, sharpenRidges, applySoilCreep, applyHypsometricCorrection, computeFlowAccumulation } from './terrain-post.js';
-import { stampCraters } from './impact-craters.js';
-import { computeWind } from './wind.js';
-import { computeOceanCurrents } from './ocean.js';
-import { computePrecipitation } from './precipitation.js';
-import { computeTemperature } from './temperature.js';
-import { classifyKoppen } from './koppen.js';
-import { buildPlanetaryParams } from './planetary-params.js';
+import { makeRng } from './core/rng.js';
+import { SimplexNoise } from './core/simplex-noise.js';
+import { setDelaunator, buildSphere, generateTriangleCenters, SphereMesh, computeNeighborDist } from './sim/sphere-mesh.js';
+import { generateCoarsePlates, projectCoarsePlates } from './sim/coarse-plates.js';
+import { smoothAndReconnectPlates } from './sim/plates.js';
+import { assignElevation } from './sim/elevation.js';
+import { warpTerrain, smoothElevation, erodeComposite, sharpenRidges, applySoilCreep, applyHypsometricCorrection, computeFlowAccumulation } from './sim/terrain-post.js';
+import { stampCraters } from './sim/impact-craters.js';
+import { computeWind } from './sim/wind.js';
+import { computeOceanCurrents } from './sim/ocean.js';
+import { computePrecipitation } from './sim/precipitation.js';
+import { computeTemperature } from './sim/temperature.js';
+import { classifyKoppen } from './sim/koppen.js';
+import { buildPlanetaryParams } from './world/planetary-params.js';
 import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
 
 setDelaunator(Delaunator);

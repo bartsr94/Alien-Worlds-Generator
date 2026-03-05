@@ -1,8 +1,8 @@
 // Elevation pipeline: collision detection, stress propagation,
 // distance fields, and final elevation assignment.
 
-import { makeRandInt, makeRng } from './rng.js';
-import { SimplexNoise } from './simplex-noise.js';
+import { makeRandInt, makeRng } from '../core/rng.js';
+import { SimplexNoise } from '../core/simplex-noise.js';
 
 // ----------------------------------------------------------------
 //  Euler-pole velocity helper

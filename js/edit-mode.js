@@ -3,13 +3,13 @@
 // for O(N) dot-product lookups rather than O(N) triangle intersection tests.
 
 import * as THREE from 'three';
-import { canvas, camera, mapCamera } from './scene.js';
-import { state } from './state.js';
+import { canvas, camera, mapCamera } from './render/scene.js';
+import { state } from './core/state.js';
 import { editRecomputeViaWorker } from './generate.js';
-import { computePlateColors, buildMesh, updateHoverHighlight, updateMapHoverHighlight, updateSelectionHighlight, clearSelectionHighlight } from './planet-mesh.js';
-import { detailFromSlider } from './detail-scale.js';
-import { KOPPEN_CLASSES } from './koppen.js';
-import { elevToHeightKm } from './color-map.js';
+import { computePlateColors, buildMesh, updateHoverHighlight, updateMapHoverHighlight, updateSelectionHighlight, clearSelectionHighlight } from './render/planet-mesh.js';
+import { detailFromSlider } from './core/detail-scale.js';
+import { KOPPEN_CLASSES } from './sim/koppen.js';
+import { elevToHeightKm } from './render/color-map.js';
 
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();

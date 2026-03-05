@@ -2,7 +2,7 @@
 // Targets ~30% land by surface area. numContinents controls how many
 // separate landmasses to create. Small trapped interior seas are absorbed.
 
-import { makeRng } from './rng.js';
+import { makeRng } from '../core/rng.js';
 
 export function assignOceanLand(mesh, r_plate, plateSeeds, r_xyz, seed, numContinents, oceanFraction = 0.70) {
     const rng = makeRng(seed + 42);

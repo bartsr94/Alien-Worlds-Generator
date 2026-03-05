@@ -1,7 +1,7 @@
 // Wind simulation: pressure-driven seasonal wind with longitude-varying ITCZ.
 // Computes pressure fields and wind vectors for summer and winter seasons.
 
-import { elevToHeightKm } from './color-map.js';
+import { elevToHeightKm } from '../render/color-map.js';
 import { smoothField, percentile } from './climate-util.js';
 
 const DEG = Math.PI / 180;

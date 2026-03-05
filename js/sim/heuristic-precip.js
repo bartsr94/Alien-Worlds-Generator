@@ -5,7 +5,7 @@
 // orographic rain shadow.
 
 import { smoothstep } from './wind.js';
-import { elevToHeightKm } from './color-map.js';
+import { elevToHeightKm } from '../render/color-map.js';
 import { smoothField, makeItczLookup } from './climate-util.js';
 
 const DEG = Math.PI / 180;

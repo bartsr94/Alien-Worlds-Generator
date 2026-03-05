@@ -15,7 +15,7 @@
  */
 
 import * as THREE from 'three';
-import { scene, orreryCamera, canvas } from './scene.js';
+import { scene, orreryCamera, canvas } from './render/scene.js';
 
 // ── Module-level state ────────────────────────────────────────────────────────
 
