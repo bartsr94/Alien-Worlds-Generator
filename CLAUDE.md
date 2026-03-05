@@ -1,8 +1,8 @@
-# CLAUDE.md
+﻿# CLAUDE.md
 
 ## Project Overview
 
-World Orogen — a browser-based procedural planet generator using Three.js and ES modules with no build step.
+Heliosphere — a browser-based procedural planet generator using Three.js and ES modules with no build step.
 
 ## Guiding Principles
 

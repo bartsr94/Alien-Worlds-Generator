@@ -13,6 +13,8 @@ export const state = {
     hoveredKoppen: -1,
     _koppenHoverBackup: null,
     _mapKoppenHoverBackup: null,
+    selectedRegion: null,
+    _selectionBackup: null,
     mapMesh: null,
     mapFaceToSide: null,
     _mapHoverBackup: null,

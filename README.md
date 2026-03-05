@@ -1,4 +1,4 @@
-# World Orogen
+﻿# Heliosphere
 
 A browser-based procedural planet generator that creates terrestrial and alien worlds with tectonic plate simulation, elevation modeling, and interactive editing. Nine world presets (Mars-like, Venus-like, Titan-like, Dead Rock, Ocean World, Ice Ball, Arid Desert, High Gravity, Random Alien) plus five Planetary Physics sliders produce genuinely alien environments. Uses native ES modules with no build step required.
 
@@ -204,14 +204,15 @@ Navigation hints are shown in the sidebar panel and as a contextual tooltip when
 |--------|---------|--------|
 | Rotate globe / pan map | Drag | Drag (one finger) |
 | Zoom | Scroll wheel | Pinch with two fingers |
-| Highlight plate + info card | Hover | — |
+| Highlight plate + quick info card | Hover | — |
+| Open tile detail panel | Left-click a tile | — |
 | Reshape continents | Ctrl-click a plate | Tap the edit button (pencil), then tap a plate |
 
-Hovering over a region shows an info card with plate type, elevation, coordinates, and (when climate has been computed) temperature, precipitation, and K&ouml;ppen classification.
+Hovering over a region shows a quick info card with plate type, elevation, coordinates, and (when climate has been computed) temperature, precipitation, and Köppen classification. **Left-clicking** any tile opens a persistent floating **Tile Detail Panel** near the click point, showing the full terrain profile, all climate fields (temperature, precipitation, wind direction and Beaufort class, ocean current warmth for ocean tiles, habitability index, hydrosphere state), biome name, and a **Found Settlement** stub button for the Heliosphere colony system. Click the × button or click anywhere else on the globe to dismiss. The clicked tile is highlighted in gold on the globe and map until the panel is closed.
 
 ### Mobile Support
 
-World Orogen is fully usable on phones and tablets:
+Heliosphere is fully usable on phones and tablets:
 
 - **Bottom-sheet sidebar** — on screens 768px or narrower, the sidebar becomes a bottom sheet with a drag handle. Drag or tap the handle to expand/collapse. The globe stays visible above.
 - **Pinch-to-zoom** — two-finger pinch zooms the globe and map, using the same smooth lerp as desktop scroll-zoom.

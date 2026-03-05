@@ -501,6 +501,67 @@ button#generate.generating {
     color: #889; text-transform: uppercase;
 }
 
+/* ── Tile Detail Panel ─────────────────────────────────────────────────────── */
+#tilePanel {
+    position: fixed;
+    width: 292px;
+    max-height: 72vh;
+    overflow-y: auto;
+    background: rgba(8,8,28,0.93);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    box-shadow: 0 6px 28px rgba(0,0,0,0.6);
+    color: #cde;
+    font-size: 13px;
+    z-index: 200;
+    display: none;
+}
+.tp-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    position: sticky; top: 0;
+    background: rgba(8,8,28,0.93); backdrop-filter: blur(12px); z-index: 1;
+}
+.tp-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+.tp-title  { flex: 1; min-width: 0; }
+.tp-bname  { display: block; font-weight: 600; color: #ddf; font-size: 13px;
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tp-kcode  { font-size: 11px; color: #667; }
+.tp-badge  { font-size: 10px; padding: 2px 7px; border-radius: 10px;
+             font-weight: 600; letter-spacing: 0.03em; flex-shrink: 0; }
+.tp-land   { background: rgba(60,120,50,0.25);  color: #8d8; border: 1px solid rgba(60,120,50,0.3);  }
+.tp-ocean  { background: rgba(30,80,200,0.25);  color: #6af; border: 1px solid rgba(30,80,200,0.3);  }
+.tp-close  { background: none; border: none; color: #556; font-size: 18px;
+             line-height: 1; padding: 0 3px; cursor: pointer; border-radius: 4px;
+             flex-shrink: 0; transition: color 0.15s; }
+.tp-close:hover { color: #cde; }
+.tp-body  { padding: 6px 0; }
+.tp-sec   { padding: 4px 12px; }
+.tp-sec + .tp-sec { border-top: 1px solid rgba(255,255,255,0.06); margin-top: 4px; padding-top: 8px; }
+.tp-sectitle { font-size: 10px; color: #446; letter-spacing: 0.08em;
+               font-weight: 600; text-transform: uppercase; margin-bottom: 6px; }
+.tp-row  { display: flex; align-items: baseline; gap: 6px; margin-bottom: 4px; line-height: 1.5; }
+.tp-lbl  { font-size: 11px; color: #778; text-transform: uppercase;
+           letter-spacing: 0.04em; min-width: 80px; flex-shrink: 0; }
+.tp-val  { font-size: 13px; color: #cde; flex: 1; }
+.tp-sub  { font-size: 10px; color: #556; }
+.tp-tdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+           vertical-align: middle; margin-right: 2px; }
+.tp-habbar  { display: inline-block; width: 56px; height: 6px;
+              background: rgba(255,255,255,0.1); border-radius: 3px;
+              vertical-align: middle; overflow: hidden; }
+.tp-habfill { display: block; height: 100%; border-radius: 3px; }
+.tp-climate-note { font-size: 11px; color: #556; font-style: italic; padding: 2px 0 6px; }
+.tp-colony-empty { font-size: 12px; color: #556; font-style: italic; margin-bottom: 8px; }
+.tp-found-btn {
+    display: block; width: 100%; padding: 7px 12px;
+    background: rgba(50,90,50,0.15); border: 1px solid rgba(70,120,70,0.2);
+    border-radius: 6px; color: #5a8; font-size: 12px;
+    cursor: not-allowed; opacity: 0.5; text-align: center;
+}
+
 /* Help button */
 #helpBtn {
     position: absolute; top: 16px; right: 16px;

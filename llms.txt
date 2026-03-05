@@ -1,8 +1,8 @@
-# World Orogen
+﻿# Heliosphere
 
 > Procedural planet generator — free, browser-based, no signup required.
 
-World Orogen generates realistic procedural planets shaped by tectonic plate simulation, erosion, and climate modeling. It runs entirely in the browser using Three.js and requires no installation, account, or payment.
+Heliosphere generates realistic procedural planets shaped by tectonic plate simulation, erosion, and climate modeling. It runs entirely in the browser using Three.js and requires no installation, account, or payment.
 
 ## What it does
 

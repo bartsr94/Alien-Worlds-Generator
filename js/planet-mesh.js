@@ -1003,6 +1003,7 @@ export function updateMeshColors() {
     colorAttr.needsUpdate = true;
     state._hoverBackup = null;
     state._koppenHoverBackup = null;
+    state._selectionBackup = null; // re-applied after full color rebuild below
 
     // Update map mesh colors in-place (if map exists)
     if (state.mapMesh && state.mapFaceToSide) {
@@ -1039,6 +1040,9 @@ export function updateMeshColors() {
 
     updateHoverHighlight();
     updateMapHoverHighlight();
+    if (state.selectedRegion !== null && state.selectedRegion >= 0) {
+        updateSelectionHighlight(state.selectedRegion);
+    }
 }
 
 // Hover highlight — brighten hovered plate's cells (surgical save/restore).
@@ -1221,6 +1225,103 @@ export function updateMapKoppenHoverHighlight() {
         state._mapKoppenHoverBackup = { offsets, saved };
     }
     colorAttr.needsUpdate = true;
+}
+
+// Selection highlight — warm gold tint on a single clicked region (globe + map).
+export function updateSelectionHighlight(region) {
+    if (!state.planetMesh || !state.curData || region === null || region < 0) return;
+    clearSelectionHighlight(); // restore any previous selection first
+    const { mesh } = state.curData;
+
+    // --- Globe ---
+    const colorAttr = state.planetMesh.geometry.getAttribute('color');
+    const colors = colorAttr.array;
+    let globeCount = 0;
+    for (let s = 0; s < mesh.numSides; s++) {
+        if (mesh.s_begin_r(s) === region) globeCount++;
+    }
+    let globeBackup = null;
+    if (globeCount > 0) {
+        const offsets = new Int32Array(globeCount);
+        const saved   = new Float32Array(globeCount * 9);
+        let idx = 0;
+        for (let s = 0; s < mesh.numSides; s++) {
+            if (mesh.s_begin_r(s) === region) {
+                offsets[idx] = s;
+                const off = s * 9;
+                for (let j = 0; j < 9; j++) saved[idx * 9 + j] = colors[off + j];
+                for (let j = 0; j < 3; j++) {
+                    colors[off + j*3]     = Math.min(1, colors[off + j*3]     + 0.40);
+                    colors[off + j*3 + 1] = Math.min(1, colors[off + j*3 + 1] + 0.35);
+                    colors[off + j*3 + 2] = Math.min(1, colors[off + j*3 + 2] + 0.00);
+                }
+                idx++;
+            }
+        }
+        colorAttr.needsUpdate = true;
+        globeBackup = { offsets, saved };
+    }
+
+    // --- Map ---
+    let mapBackup = null;
+    if (state.mapMesh && state.mapFaceToSide) {
+        const mapColorAttr = state.mapMesh.geometry.getAttribute('color');
+        const mapColors = mapColorAttr.array;
+        const fts = state.mapFaceToSide;
+        let mapCount = 0;
+        for (let f = 0; f < fts.length; f++) {
+            if (mesh.s_begin_r(fts[f]) === region) mapCount++;
+        }
+        if (mapCount > 0) {
+            const offsets = new Int32Array(mapCount);
+            const saved   = new Float32Array(mapCount * 9);
+            let idx = 0;
+            for (let f = 0; f < fts.length; f++) {
+                if (mesh.s_begin_r(fts[f]) === region) {
+                    offsets[idx] = f;
+                    const off = f * 9;
+                    for (let j = 0; j < 9; j++) saved[idx * 9 + j] = mapColors[off + j];
+                    for (let j = 0; j < 3; j++) {
+                        mapColors[off + j*3]     = Math.min(1, mapColors[off + j*3]     + 0.40);
+                        mapColors[off + j*3 + 1] = Math.min(1, mapColors[off + j*3 + 1] + 0.35);
+                        mapColors[off + j*3 + 2] = Math.min(1, mapColors[off + j*3 + 2] + 0.00);
+                    }
+                    idx++;
+                }
+            }
+            mapColorAttr.needsUpdate = true;
+            mapBackup = { offsets, saved };
+        }
+    }
+
+    if (globeBackup || mapBackup) {
+        state._selectionBackup = { region, globe: globeBackup, map: mapBackup };
+    }
+}
+
+// Restore the selected-tile highlight (called before any full color rebuild).
+export function clearSelectionHighlight() {
+    if (!state._selectionBackup) return;
+    const { globe, map } = state._selectionBackup;
+    if (globe && state.planetMesh) {
+        const colorAttr = state.planetMesh.geometry.getAttribute('color');
+        const colors = colorAttr.array;
+        for (let i = 0; i < globe.offsets.length; i++) {
+            const off = globe.offsets[i] * 9;
+            for (let j = 0; j < 9; j++) colors[off + j] = globe.saved[i * 9 + j];
+        }
+        colorAttr.needsUpdate = true;
+    }
+    if (map && state.mapMesh) {
+        const mapColorAttr = state.mapMesh.geometry.getAttribute('color');
+        const mapColors = mapColorAttr.array;
+        for (let i = 0; i < map.offsets.length; i++) {
+            const off = map.offsets[i] * 9;
+            for (let j = 0; j < 9; j++) mapColors[off + j] = map.saved[i * 9 + j];
+        }
+        mapColorAttr.needsUpdate = true;
+    }
+    state._selectionBackup = null;
 }
 
 // Drift arrows — show plate movement directions.

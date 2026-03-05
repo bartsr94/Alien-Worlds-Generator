@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { canvas, camera, mapCamera } from './scene.js';
 import { state } from './state.js';
 import { editRecomputeViaWorker } from './generate.js';
-import { computePlateColors, buildMesh, updateHoverHighlight, updateMapHoverHighlight } from './planet-mesh.js';
+import { computePlateColors, buildMesh, updateHoverHighlight, updateMapHoverHighlight, updateSelectionHighlight, clearSelectionHighlight } from './planet-mesh.js';
 import { detailFromSlider } from './detail-scale.js';
 import { KOPPEN_CLASSES } from './koppen.js';
 import { elevToHeightKm } from './color-map.js';
@@ -177,9 +177,192 @@ function buildHoverHTML(region, plate) {
     return lines.join('<br>');
 }
 
+// ── Tile panel helpers ────────────────────────────────────────────────────────
+
+/** Convert wind vector angle (atan2 of east/north) to 8-point compass label. */
+function angleToCompass(rad) {
+    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    const deg = ((rad * 180 / Math.PI) % 360 + 360) % 360;
+    return dirs[Math.round(deg / 45) % 8];
+}
+
+/** Map normalised wind magnitude (0–1) to a Beaufort-class word. */
+function windSpeedWord(mag) {
+    if (mag < 0.05) return 'Calm';
+    if (mag < 0.15) return 'Light';
+    if (mag < 0.30) return 'Breeze';
+    if (mag < 0.50) return 'Fresh';
+    if (mag < 0.70) return 'Strong';
+    return 'Gale';
+}
+
+/** Map temperature in °C to a CSS colour string. */
+function tempDotColor(c) {
+    if (c <= -40) return '#88aaff';
+    if (c <=   0) return '#aaccff';
+    if (c <=  15) return '#aaffcc';
+    if (c <=  30) return '#ffee88';
+    if (c <=  50) return '#ffaa44';
+    return '#ff4422';
+}
+
+/** Build the inner HTML for the tile detail panel. */
+function buildTilePanelHTML(region) {
+    const d = state.curData;
+    const plate   = d.r_plate[region];
+    const isOcean = d.plateIsOcean.has(plate);
+    const elevKm  = elevToHeightKm(d.r_elevation[region]);
+
+    // Coordinates
+    const rx = d.r_xyz[3 * region], ry = d.r_xyz[3 * region + 1], rz = d.r_xyz[3 * region + 2];
+    const lat    = Math.asin(Math.max(-1, Math.min(1, ry))) * (180 / Math.PI);
+    const lon    = Math.atan2(rx, rz) * (180 / Math.PI);
+    const latStr = Math.abs(lat).toFixed(1) + '\u00b0' + (lat >= 0 ? 'N' : 'S');
+    const lonStr = Math.abs(lon).toFixed(1) + '\u00b0' + (lon >= 0 ? 'E' : 'W');
+
+    // K\u00f6ppen biome
+    let biomeName = isOcean ? 'Ocean' : 'Land';
+    let biomeHex  = isOcean ? '#1a4488' : '#3a6a2a';
+    let koppenCode = '\u2014';
+    if (state.climateComputed && d.debugLayers && d.debugLayers.koppen) {
+        const kIdx = d.debugLayers.koppen[region];
+        const kc   = KOPPEN_CLASSES[kIdx];
+        if (kc) {
+            biomeName  = kc.name;
+            koppenCode = kc.code;
+            const [r, g, b] = kc.color;
+            biomeHex = '#' + [r, g, b].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+        }
+    }
+
+    // Climate rows
+    let climateRows = '';
+    if (!state.climateComputed) {
+        climateRows = '<div class="tp-climate-note">Switch to a Climate view to compute climate data.</div>';
+    } else {
+        // Temperature
+        if (d.r_temperature_summer) {
+            const pp      = state.planetaryParams;
+            const eqT     = pp?.equatorialTempC ?? 28;
+            const tMin    = eqT - (pp?.tempRangeC ?? 47) - 26;
+            const tRange  = Math.max(1, (eqT + 17) - tMin);
+            const tS = (tMin + Math.max(0, Math.min(1, d.r_temperature_summer[region])) * tRange).toFixed(0);
+            const tW = (tMin + Math.max(0, Math.min(1, d.r_temperature_winter[region])) * tRange).toFixed(0);
+            climateRows += `<div class="tp-row"><span class="tp-lbl">Temp</span><span class="tp-val"><span class="tp-tdot" style="background:${tempDotColor(+tS)}"></span>${tS}\u00b0C / <span class="tp-tdot" style="background:${tempDotColor(+tW)}"></span>${tW}\u00b0C <span class="tp-sub">Su / Wi</span></span></div>`;
+        }
+        // Precipitation (land only)
+        if (!isOcean && d.r_precip_summer) {
+            const pS = (Math.max(0, d.r_precip_summer[region]) * 1250).toFixed(0);
+            const pW = (Math.max(0, d.r_precip_winter[region]) * 1250).toFixed(0);
+            climateRows += `<div class="tp-row"><span class="tp-lbl">Precip</span><span class="tp-val">${pS} / ${pW} mm <span class="tp-sub">Su / Wi</span></span></div>`;
+        }
+        // Wind
+        if (d.r_wind_east_summer) {
+            const weS = d.r_wind_east_summer[region],  wnS = d.r_wind_north_summer[region];
+            const weW = d.r_wind_east_winter[region],  wnW = d.r_wind_north_winter[region];
+            const dS  = angleToCompass(Math.atan2(weS, wnS)) + ' ' + windSpeedWord(Math.sqrt(weS*weS + wnS*wnS));
+            const dW  = angleToCompass(Math.atan2(weW, wnW)) + ' ' + windSpeedWord(Math.sqrt(weW*weW + wnW*wnW));
+            climateRows += `<div class="tp-row"><span class="tp-lbl">Wind</span><span class="tp-val">${dS} / ${dW} <span class="tp-sub">Su / Wi</span></span></div>`;
+        }
+        // Ocean current (ocean tiles only)
+        if (isOcean && d.r_ocean_current_east_summer) {
+            const ocES = d.r_ocean_current_east_summer[region],  ocNS = d.r_ocean_current_north_summer[region];
+            const ocEW = d.r_ocean_current_east_winter[region],  ocNW = d.r_ocean_current_north_winter[region];
+            const wS = d.r_ocean_warmth_summer[region],  wW = d.r_ocean_warmth_winter[region];
+            const therm = v => v > 0.6 ? 'Warm' : v < 0.4 ? 'Cold' : 'Neutral';
+            const dS = angleToCompass(Math.atan2(ocES, ocNS)) + ' ' + therm(wS);
+            const dW = angleToCompass(Math.atan2(ocEW, ocNW)) + ' ' + therm(wW);
+            climateRows += `<div class="tp-row"><span class="tp-lbl">Current</span><span class="tp-val">${dS} / ${dW} <span class="tp-sub">Su / Wi</span></span></div>`;
+        }
+        // Habitability
+        if (d.debugLayers && d.debugLayers.habitability) {
+            const hab = Math.max(0, Math.min(1, d.debugLayers.habitability[region]));
+            const pct = Math.round(hab * 100);
+            const hc  = hab < 0.25 ? '#c44' : hab < 0.55 ? '#ca4' : '#4a4';
+            climateRows += `<div class="tp-row"><span class="tp-lbl">Habitability</span><span class="tp-val"><span class="tp-habbar"><span class="tp-habfill" style="width:${pct}%;background:${hc}"></span></span>\u00a0${pct}%</span></div>`;
+        }
+        // Hydrosphere state: 0=liquid ocean, 1=frozen, 2=dry basin, 3=land
+        if (d.debugLayers && d.debugLayers.hydroState) {
+            const HS = ['Liquid Ocean', 'Frozen', 'Dry Basin', 'Land'];
+            climateRows += `<div class="tp-row"><span class="tp-lbl">Hydro</span><span class="tp-val">${HS[d.debugLayers.hydroState[region]] ?? 'Land'}</span></div>`;
+        }
+    }
+
+    const elevStr = elevKm >= 0 ? `+${elevKm.toFixed(2)} km` : `${elevKm.toFixed(2)} km`;
+    return `<div class="tp-header">
+  <span class="tp-swatch" style="background:${biomeHex}"></span>
+  <div class="tp-title"><span class="tp-bname">${biomeName}</span><span class="tp-kcode">${koppenCode}</span></div>
+  <span class="tp-badge ${isOcean ? 'tp-ocean' : 'tp-land'}">${isOcean ? 'Ocean' : 'Land'}</span>
+  <button class="tp-close" id="tpClose">&times;</button>
+</div>
+<div class="tp-body">
+  <div class="tp-sec">
+    <div class="tp-sectitle">TERRAIN</div>
+    <div class="tp-row"><span class="tp-lbl">Elevation</span><span class="tp-val">${elevStr}</span></div>
+    <div class="tp-row"><span class="tp-lbl">Plate</span><span class="tp-val">${isOcean ? 'Ocean' : 'Land'} #${plate}</span></div>
+    <div class="tp-row"><span class="tp-lbl">Coords</span><span class="tp-val">${latStr}, ${lonStr}</span></div>
+  </div>
+  <div class="tp-sec">
+    <div class="tp-sectitle">CLIMATE</div>
+    ${climateRows}
+  </div>
+  <div class="tp-sec">
+    <div class="tp-sectitle">COLONY</div>
+    <div class="tp-colony-empty">No settlement here yet.</div>
+    <button class="tp-found-btn" disabled>&#x2295; Found Settlement</button>
+  </div>
+</div>`;
+}
+
+/** Show the tile detail panel near (cx, cy) and highlight the clicked region. */
+function showTilePanel(region, cx, cy) {
+    const panel = document.getElementById('tilePanel');
+    if (!panel) return;
+
+    // Clear any plate hover so it doesn't overlap the panel
+    state.hoveredPlate  = -1;
+    state.hoveredRegion = -1;
+    document.getElementById('hoverInfo').style.display = 'none';
+    if (state.mapMode) updateMapHoverHighlight();
+    else updateHoverHighlight();
+
+    state.selectedRegion = region;
+    updateSelectionHighlight(region);
+
+    panel.innerHTML = buildTilePanelHTML(region);
+    document.getElementById('tpClose')?.addEventListener('click', hideTilePanel);
+
+    // Position: right of click; flip left if near right edge
+    const W = 308, margin = 14;
+    let left = cx + margin;
+    if (left + W > window.innerWidth - 8) left = cx - W - margin + 12;
+    if (left < 8) left = 8;
+    panel.style.left = left + 'px';
+    panel.style.top  = Math.max(8, cy - 24) + 'px';
+    panel.style.display = 'block';
+
+    // Clamp bottom edge after paint
+    requestAnimationFrame(() => {
+        if (!panel || panel.style.display === 'none') return;
+        const rect = panel.getBoundingClientRect();
+        if (rect.bottom > window.innerHeight - 8) {
+            panel.style.top = Math.max(8, window.innerHeight - rect.height - 8) + 'px';
+        }
+    });
+}
+
+/** Hide the tile detail panel and clear the selection highlight. */
+export function hideTilePanel() {
+    state.selectedRegion = null;
+    clearSelectionHighlight();
+    const panel = document.getElementById('tilePanel');
+    if (panel) panel.style.display = 'none';
+}
+
 /** Set up hover and ctrl-click event listeners. */
 export function setupEditMode() {
     let downInfo = null;
+    let tileDown = null; // tracks plain-left-click start for tile panel
     let orbiting = false;
     let lastHoverTime = 0;
     const HOVER_INTERVAL = 50; // ms — cap hover lookups
@@ -197,11 +380,32 @@ export function setupEditMode() {
         } else if (e.button === 0 || e.button === 2) {
             // Regular click/right-click: orbit or pan — skip hover raycasts
             orbiting = true;
+            // Track plain left-click start for tile panel (desktop only)
+            if (e.button === 0 && !state.isTouchDevice) {
+                tileDown = { x: e.clientX, y: e.clientY };
+            }
         }
     });
 
     canvas.addEventListener('pointerup', (e) => {
         orbiting = false;
+
+        // Plain left-click → tile detail panel
+        if (tileDown !== null && e.button === 0) {
+            const tdx = e.clientX - tileDown.x;
+            const tdy = e.clientY - tileDown.y;
+            const wasClick = tdx * tdx + tdy * tdy < 36;
+            tileDown = null;
+            if (wasClick && !state.solarSystemMode && state.curData) {
+                const hit = getHitInfo(e);
+                if (hit) {
+                    showTilePanel(hit.region, e.clientX, e.clientY);
+                } else {
+                    hideTilePanel();
+                }
+            }
+        }
+
         if (state.solarSystemMode) { downInfo = null; return; }
         if (!downInfo || !state.curData || e.button !== 0) { downInfo = null; return; }
 
@@ -262,6 +466,8 @@ export function setupEditMode() {
             return;
         }
 
+        // Skip while a tile panel is open (hover would overlap)
+        if (state.selectedRegion !== null) return;
         // Skip while orbiting/panning — no hover lookup during drag
         if (orbiting) return;
 

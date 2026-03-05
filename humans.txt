@@ -1,5 +1,5 @@
 /* TEAM */
-Project: World Orogen
+Project: Heliosphere
 Site: https://orogen.studio
 Contact: https://github.com/raguilar011095/planet_heightmap_generation
 

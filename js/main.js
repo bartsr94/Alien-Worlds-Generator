@@ -10,8 +10,8 @@ import { renderer, scene, camera, ctrl, waterMesh, atmosMesh, starsMesh,
 import { state } from './state.js';
 import { generate, reapplyViaWorker, computeClimateViaWorker } from './generate.js';
 import { encodePlanetCode, decodePlanetCode } from './planet-code.js';
-import { buildMesh, updateMeshColors, buildMapMesh, rebuildGrids, exportMap, exportMapBatch, buildWindArrows, buildOceanCurrentArrows, updateKoppenHoverHighlight, updateMapKoppenHoverHighlight } from './planet-mesh.js';
-import { setupEditMode } from './edit-mode.js';
+import { buildMesh, updateMeshColors, buildMapMesh, rebuildGrids, exportMap, exportMapBatch, buildWindArrows, buildOceanCurrentArrows, updateKoppenHoverHighlight, updateMapKoppenHoverHighlight, clearSelectionHighlight } from './planet-mesh.js';
+import { setupEditMode, hideTilePanel } from './edit-mode.js';
 import { detailFromSlider, sliderFromDetail } from './detail-scale.js';
 import { KOPPEN_CLASSES } from './koppen.js';
 import { elevationToColor, setUpliftMult, setHasLiquidOcean,
@@ -572,6 +572,12 @@ genBtn.addEventListener('click', () => {
 });
 genBtn.addEventListener('generate-done', snapshotSliders);
 genBtn.addEventListener('generate-done', hideBuildOverlay);
+genBtn.addEventListener('generate-done', () => {
+    // Close tile panel and clear selection on any user-triggered generation
+    if (state.isBgGenerating) return;
+    hideTilePanel();
+    clearSelectionHighlight();
+});
 genBtn.addEventListener('generate-done', () => {
     const infoEl = document.getElementById('info');
     if (!infoEl.dataset.nudged) {
