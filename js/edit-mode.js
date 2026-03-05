@@ -332,6 +332,32 @@ function showTilePanel(region, cx, cy) {
     panel.innerHTML = buildTilePanelHTML(region);
     document.getElementById('tpClose')?.addEventListener('click', hideTilePanel);
 
+    // Drag — pointerdown on the header starts a free drag
+    const header = panel.querySelector('.tp-header');
+    if (header) {
+        let dragState = null;
+        const onDragMove = (ev) => {
+            if (!dragState) return;
+            const pw = panel.offsetWidth, ph = panel.offsetHeight;
+            panel.style.left = Math.max(0, Math.min(window.innerWidth  - pw, dragState.origLeft + ev.clientX - dragState.startX)) + 'px';
+            panel.style.top  = Math.max(0, Math.min(window.innerHeight - ph, dragState.origTop  + ev.clientY - dragState.startY)) + 'px';
+        };
+        const onDragEnd = () => {
+            dragState = null;
+            document.removeEventListener('pointermove', onDragMove);
+            header.style.cursor = 'grab';
+        };
+        header.addEventListener('pointerdown', (ev) => {
+            if (ev.target.closest('.tp-close')) return;
+            ev.preventDefault();
+            const rect = panel.getBoundingClientRect();
+            dragState = { startX: ev.clientX, startY: ev.clientY, origLeft: rect.left, origTop: rect.top };
+            header.style.cursor = 'grabbing';
+            document.addEventListener('pointermove', onDragMove);
+            document.addEventListener('pointerup', onDragEnd, { once: true });
+        });
+    }
+
     // Position: right of click; flip left if near right edge
     const W = 308, margin = 14;
     let left = cx + margin;
@@ -498,5 +524,12 @@ export function setupEditMode() {
                 hoverEl.style.display = 'none';
             }
         }
+    });
+
+    // Close tile panel when clicking outside it (sidebar, buttons, empty canvas space)
+    document.addEventListener('pointerdown', (e) => {
+        if (state.selectedRegion === null) return;
+        const panel = document.getElementById('tilePanel');
+        if (panel && !panel.contains(e.target)) hideTilePanel();
     });
 }

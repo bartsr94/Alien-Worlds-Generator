@@ -523,6 +523,8 @@ button#generate.generating {
     border-bottom: 1px solid rgba(255,255,255,0.07);
     position: sticky; top: 0;
     background: rgba(8,8,28,0.93); backdrop-filter: blur(12px); z-index: 1;
+    cursor: grab;
+    user-select: none;
 }
 .tp-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
 .tp-title  { flex: 1; min-width: 0; }

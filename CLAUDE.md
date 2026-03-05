@@ -83,6 +83,18 @@ After any code change that adds a new full-disc globe visual effect (something v
 
 Existing example: `hazeMesh`/`updateHazeLayer` (full-disc atmospheric haze opacity, r=1.01 sphere, driven by `params.hazeOpacity` + `params.atmosphereTint`).
 
+After any code change that adds or modifies the tile detail panel (click-to-inspect interaction), be aware of the **tile panel architecture**:
+
+- **`state.selectedRegion`** (`null` or region index) — the currently selected tile. `null` = no selection.
+- **`state._selectionBackup`** (`null` or `{ region, globe: {offsets, saved}, map: {offsets, saved} }`) — stores original vertex colors for the selected tile so its gold highlight can be precisely restored. Cleared by `clearSelectionHighlight()` in `js/planet-mesh.js`.
+- **`updateSelectionHighlight(region)`** / **`clearSelectionHighlight()`** — exported from `js/planet-mesh.js`. The gold tint is `R+0.40, G+0.35, B+0.00` (distinct from the plate hover `+0.22` uniform brighten). Called from `updateMeshColors` at the end of every full color rebuild so the selection survives layer-switching.
+- **`showTilePanel(region, cx, cy)`** / **`export function hideTilePanel()`** — in `js/edit-mode.js`. `hideTilePanel` is also exported and imported by `js/main.js` for generate-done cleanup.
+- **Hover suppression**: the `pointermove` handler in `js/edit-mode.js` has an early-return guard `if (state.selectedRegion !== null) return` so the hover card is hidden while a tile panel is open.
+- **Close-on-outside**: a single `document.addEventListener('pointerdown', ...)` registered in `setupEditMode()` closes the panel if the click target is not inside `#tilePanel`.
+- **Draggable header**: drag logic is attached per-panel in `showTilePanel()` using per-call `pointermove`/`pointerup` listeners on `document` that are cleaned up on drag-end.
+- **Mobile**: the tile panel is intentionally desktop-only. The `tileDown` tracking only starts when `!state.isTouchDevice`.
+- **generate-done cleanup**: `main.js` calls `hideTilePanel()` + `clearSelectionHighlight()` on every non-background-generation `generate-done` event.
+
 After any code change that adds a new alien (X) Köppen zone, follow the **`koppen.js` alien zone pattern**. Alien zones use 2-letter codes starting with `X` (to avoid conflict with standard Köppen `A/B/C/D/E` bands) and are checked at the top of the per-cell classification loop, before any standard band logic.
 
 1. **Add to `KOPPEN_CLASSES`** at the bottom of the array in `js/koppen.js` (after `EF`, together with the other X zones). Each entry needs `{ code, name, color [r,g,b 0–1] }`.
