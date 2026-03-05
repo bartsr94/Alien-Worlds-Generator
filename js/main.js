@@ -22,6 +22,11 @@ import { initOrrery, tickOrrery, enterOrrery, exitOrrery, getBodyAtMouse } from 
 import { tickClock, getGameDate, isPaused, togglePause, setSpeedIndex,
          getSpeedIndex, resetClock } from './game-clock.js';
 import { bodyParamsToSliderValues } from './system-planet-params.js';
+import {
+    loadRegistry, upsertSystem, deleteSystem, setActiveSystemId,
+    getBodyOverride, saveBodyOverride, clearBodyOverride,
+    markBodyGenerated, isBodyGenerated, renameSystem,
+} from './system-storage.js';
 
 // World Preset definitions — { gravity, atm, hydro, baseTemp, tilt }
 const WORLD_PRESETS = {
@@ -617,7 +622,7 @@ function updatePlanetCode(flash) {
         +document.getElementById('sHEr').value,
         +document.getElementById('sTEr').value,
         +document.getElementById('sRs').value,
-        +document.getElementById('sSc').value,
+        +(document.getElementById('sSc')?.value ?? 0.75),
         getToggledIndices(),
         +(document.getElementById('sGravity')?.value  ?? 1.0),
         +(document.getElementById('sAtm')?.value      ?? 3),
@@ -636,11 +641,11 @@ function updatePlanetCode(flash) {
 }
 
 genBtn.addEventListener('generate-done', () => {
-    if (state.isBgGenerating) return; // solar system background body — skip code update
+    if (state.isBgGenerating || state.currentSystem) return; // solar system body — skip code update
     updatePlanetCode(false);
 });
 genBtn.addEventListener('generate-done', () => {
-    if (state.isBgGenerating) return; // solar system background body — skip all visual updates
+    if (state.isBgGenerating || state.currentSystem) return; // solar system body — skip standalone visual updates
     // Update state.planetaryParams from current slider values
     state.planetaryParams = buildPlanetaryParams({
         gravity:     +(document.getElementById('sGravity')?.value  ?? 1.0),
@@ -1275,6 +1280,9 @@ function switchPanel(kind) {
                 status.textContent = 'viewing'; status.classList.add('active');
             } else if (state.generatedBodies.has(body.id)) {
                 status.textContent = '✓ ready'; status.classList.add('ready');
+            } else if (state.currentSystemId && isBodyGenerated(state.currentSystemId, body.id)) {
+                // Previously generated in a past session but not yet in the in-session cache
+                status.textContent = '✓'; status.classList.add('ready');
             } else if (canEnter) {
                 status.textContent = '…';
             }
@@ -1285,6 +1293,114 @@ function switchPanel(kind) {
             }
             bodyListEl.appendChild(item);
         }
+    }
+
+    // ── Saved Systems list ────────────────────────────────────────────────────
+    function renderSavedSystemsList() {
+        const listEl = document.getElementById('savedSystemsList');
+        if (!listEl) return;
+        const registry = loadRegistry();
+        listEl.innerHTML = '';
+
+        if (registry.systems.length === 0) {
+            const empty = document.createElement('li');
+            empty.className = 'saved-system-empty';
+            empty.textContent = 'No saved systems yet.';
+            listEl.appendChild(empty);
+            return;
+        }
+
+        for (const sys of registry.systems) {
+            const isActive = sys.id === state.currentSystemId;
+            const hasOverrides = Object.keys(sys.bodyOverrides ?? {}).length > 0;
+            const genCount = (sys.generatedBodyIds ?? []).length;
+
+            const li = document.createElement('li');
+            li.className = 'saved-system-row' + (isActive ? ' active' : '');
+
+            // Left: name + badges
+            const left = document.createElement('div');
+            left.className = 'saved-system-left';
+
+            const badge = document.createElement('span');
+            badge.className = `saved-system-badge saved-system-badge-${sys.type}`;
+            badge.textContent = sys.type === 'sol' ? 'Sol' : 'Random';
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'saved-system-name';
+            nameSpan.setAttribute('contenteditable', 'true');
+            nameSpan.setAttribute('spellcheck', 'false');
+            nameSpan.textContent = sys.name;
+            if (hasOverrides) {
+                const mod = document.createElement('span');
+                mod.className = 'saved-system-modified';
+                mod.textContent = ' (modified)';
+                nameSpan.appendChild(mod);
+            }
+            nameSpan.addEventListener('blur', () => {
+                const raw = nameSpan.childNodes[0]?.nodeValue?.trim() ?? '';
+                if (raw && raw !== sys.name) {
+                    renameSystem(sys.id, raw);
+                    renderSavedSystemsList();
+                }
+            });
+            nameSpan.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { e.preventDefault(); nameSpan.blur(); }
+            });
+
+            const meta = document.createElement('span');
+            meta.className = 'saved-system-meta';
+            meta.textContent = `${genCount} explored · ${_relativeDate(sys.savedAt)}`;
+
+            left.append(badge, nameSpan, meta);
+
+            // Right: action buttons
+            const right = document.createElement('div');
+            right.className = 'saved-system-actions';
+
+            if (!isActive) {
+                const loadBtn = document.createElement('button');
+                loadBtn.className = 'saved-system-btn';
+                loadBtn.textContent = 'Load';
+                loadBtn.addEventListener('click', () => {
+                    if (sys.type === 'sol') {
+                        enterSystemMode(OUR_SOLAR_SYSTEM);
+                    } else if (sys.seed) {
+                        enterSystemMode(generateSystem(sys.seed));
+                    }
+                });
+                right.appendChild(loadBtn);
+            }
+
+            const delBtn = document.createElement('button');
+            delBtn.className = 'saved-system-btn saved-system-btn-danger';
+            delBtn.textContent = '✕';
+            delBtn.title = 'Delete saved system';
+            delBtn.addEventListener('click', () => {
+                if (!confirm(`Delete "${sys.name}" from saved systems?`)) return;
+                deleteSystem(sys.id);
+                // If we deleted the active system's record, clear the currentSystemId
+                // so it doesn't reappear on next page load
+                if (sys.id === state.currentSystemId) {
+                    setActiveSystemId(null);
+                }
+                renderSavedSystemsList();
+            });
+            right.appendChild(delBtn);
+
+            li.append(left, right);
+            listEl.appendChild(li);
+        }
+    }
+
+    function _relativeDate(ts) {
+        if (!ts) return '';
+        const diffMs  = Date.now() - ts;
+        const diffDays = Math.floor(diffMs / 86400000);
+        if (diffDays === 0) return 'today';
+        if (diffDays === 1) return 'yesterday';
+        if (diffDays < 30) return `${diffDays}d ago`;
+        return new Date(ts).toLocaleDateString();
     }
 
     // ── Enter a solar system body (set sliders + generate or restore) ─────────
@@ -1316,6 +1432,9 @@ function switchPanel(kind) {
             const cached = state.generatedBodies.get(bodyId);
             state.curData = cached.curData;
             applyBodyParams(body.params);
+            // Layer any stored override on top of base params
+            const override = getBodyOverride(state.currentSystemId, bodyId);
+            if (override) applyBodyParams(override);
             // Re-apply planetary params module state
             state.planetaryParams = buildPlanetaryParams({
                 gravity: +(document.getElementById('sGravity')?.value ?? 1.0),
@@ -1345,6 +1464,9 @@ function switchPanel(kind) {
 
         // Not cached → run full generation
         applyBodyParams(body.params);
+        // Layer any stored override on top of base params
+        const override = getBodyOverride(state.currentSystemId, bodyId);
+        if (override) applyBodyParams(override);
         showBuildOverlay();
         generate(
             /* seed */ _systemSeed ^ (bodyId.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0)),
@@ -1380,6 +1502,7 @@ function switchPanel(kind) {
         atmosMesh.visible = false;
         starsMesh.visible = false;
         if (state.wireMesh) state.wireMesh.visible = false;
+        updateHazeLayer(0, null);
 
         switchToOrrery();
         enterOrrery();
@@ -1389,14 +1512,45 @@ function switchPanel(kind) {
 
     // ── Enter system mode (from planet-only mode) ─────────────────────────────
     function enterSystemMode(system) {
+        // Compute a stable string ID for this system so its cache persists across
+        // system-switching within the same session.
+        // Use identity comparison to distinguish OUR_SOLAR_SYSTEM from any
+        // random system that might coincidentally share the same seed value.
+        const isSol    = Object.is(system, OUR_SOLAR_SYSTEM);
+        const systemId = isSol ? 'sol' : `random-${system.seed}`;
+        const systemType = isSol ? 'sol' : 'random';
+
         state.currentSystem   = system;
+        state.currentSystemId = systemId;
         state.solarSystemMode = true;
         state.activeBodyId    = null;
-        state.generatedBodies = new Map();
+
+        // ── Per-system cache: reuse existing map if we visited this system before ──
+        state.systemCaches ??= {}; // guard for any stale module instances
+        if (!state.systemCaches[systemId]) {
+            state.systemCaches[systemId] = new Map();
+        }
+        state.generatedBodies = state.systemCaches[systemId];
+
         state.bodyQueue       = [];
         _bgBodyId             = null;
         _systemSeed           = system.seed || Math.floor(Math.random() * 0xFFFFFF);
         resetClock();
+
+        // ── Persist to localStorage ───────────────────────────────────────────
+        const existing = loadRegistry().systems.find(s => s.id === systemId);
+        upsertSystem({
+            id:               systemId,
+            name:             system.name,
+            type:             systemType,
+            seed:             isSol ? null : (system.seed || null),
+            savedAt:          Date.now(),
+            // Preserve existing user data; don't overwrite on re-entry
+            bodyOverrides:    existing?.bodyOverrides    ?? {},
+            generatedBodyIds: existing?.generatedBodyIds ?? [],
+        });
+        setActiveSystemId(systemId);
+        renderSavedSystemsList();
 
         // Show system panel in sidebar, hide the normal planet controls
         switchPanel('system');
@@ -1410,6 +1564,7 @@ function switchPanel(kind) {
         atmosMesh.visible = false;
         starsMesh.visible = false;
         if (state.wireMesh) state.wireMesh.visible = false;
+        updateHazeLayer(0, null);
 
         switchToOrrery();
         initOrrery(system);
@@ -1493,11 +1648,13 @@ function switchPanel(kind) {
         if (isBackground) {
             // Cache the raw generation data
             state.generatedBodies.set(_bgBodyId, { curData: state.curData });
+            markBodyGenerated(state.currentSystemId, _bgBodyId);
             _bgBodyId = null;
             state.isBgGenerating = false;
 
             // buildMesh() was skipped (isBgGenerating flag), so no mesh suppression needed.
             renderBodyList();
+            renderSavedSystemsList();
             // Keep background queue moving
             setTimeout(advanceBodyQueue, 200);
             return;
@@ -1506,8 +1663,39 @@ function switchPanel(kind) {
         if (_pendingBodyId) {
             // User clicked into this body — cache it
             state.generatedBodies.set(_pendingBodyId, { curData: state.curData });
+
+            // ── Persist any physics slider changes made before generation ──────
+            const sys    = state.currentSystem;
+            const bodyId = _pendingBodyId;
+            const body   = sys?.bodies.find(b => b.id === bodyId);
+            if (body?.params && state.currentSystemId) {
+                const currentParams = {
+                    gravity:     +(document.getElementById('sGravity')?.value  ?? body.params.gravity),
+                    atmosphere:  +(document.getElementById('sAtm')?.value      ?? body.params.atmosphere),
+                    hydrosphere: +(document.getElementById('sHydro')?.value    ?? body.params.hydrosphere),
+                    baseTemp:    +(document.getElementById('sBaseTemp')?.value  ?? body.params.baseTemp),
+                    axialTilt:   +(document.getElementById('sTilt')?.value      ?? body.params.axialTilt),
+                };
+                // Compare against base body params (post bodyParamsToSliderValues conversion)
+                const sv = bodyParamsToSliderValues(body.params) ?? body.params;
+                const changed = (
+                    currentParams.gravity     !== +sv.gravity     ||
+                    currentParams.atmosphere  !== +sv.atmosphere  ||
+                    currentParams.hydrosphere !== +sv.hydrosphere ||
+                    currentParams.baseTemp    !== +sv.baseTemp    ||
+                    currentParams.axialTilt   !== +sv.axialTilt
+                );
+                if (changed) {
+                    saveBodyOverride(state.currentSystemId, bodyId, currentParams);
+                } else {
+                    clearBodyOverride(state.currentSystemId, bodyId);
+                }
+                markBodyGenerated(state.currentSystemId, bodyId);
+            }
+
             _pendingBodyId = null;
             renderBodyList();
+            renderSavedSystemsList();
         }
     });
 
@@ -1587,6 +1775,21 @@ function switchPanel(kind) {
     backToGlobeBtn?.addEventListener('click', backToSystem);
     document.getElementById('bodyBannerBackBtn')?.addEventListener('click', backToSystem);
 
+    // ── Reset body physics to defaults ────────────────────────────────────────
+    document.getElementById('bodyResetParamsBtn')?.addEventListener('click', () => {
+        const bodyId = state.activeBodyId;
+        if (!bodyId || !state.currentSystemId) return;
+        const body = state.currentSystem?.bodies.find(b => b.id === bodyId);
+        if (!body?.params) return;
+        // Clear the stored override
+        clearBodyOverride(state.currentSystemId, bodyId);
+        // Remove from in-session cache so the next enterBody() regenerates cleanly
+        state.generatedBodies.delete(bodyId);
+        // Re-enter the body with fresh default params
+        enterBody(bodyId);
+        renderSavedSystemsList();
+    });
+
     // ── Orrery hover info card ────────────────────────────────────────────────
     canvas.addEventListener('mousemove', (e) => {
         if (!state.solarSystemMode || state.activeBodyId) return;
@@ -1632,6 +1835,8 @@ function switchPanel(kind) {
         tickOrrery(gameDt);
         if (gameDateEl) gameDateEl.textContent = getGameDate();
     };
+    // Expose enterSystemMode at module level for the page-load restore code
+    window._enterSystemMode = enterSystemMode;
 })();
 
 let _lastFrameTime = performance.now();
@@ -1650,6 +1855,7 @@ function animate() {
         atmosMesh.visible = false;
         starsMesh.visible = false;
         if (state.wireMesh) state.wireMesh.visible = false;
+        updateHazeLayer(0, null);
         if (state.globeGridMesh) state.globeGridMesh.visible = false;
         if (state.mapGridMesh) state.mapGridMesh.visible = false;
         if (state.arrowGroup) state.arrowGroup.visible = false;
@@ -1866,10 +2072,11 @@ window.takePreview = function(width = 1200, height = 630) {
     console.log('preview.png downloaded!');
 };
 
-// Go! Check URL hash for a planet code, otherwise random generation.
+// Go! Check URL hash for a planet code, otherwise check stored system state.
 const hashCode = location.hash.replace(/^#/, '').trim();
 const hashParams = hashCode ? decodePlanetCode(hashCode) : null;
 if (hashParams) {
+    // URL hash is a valid standalone planet code — load it, skip system restore
     const map = {
         sN: sliderFromDetail(hashParams.N), sJ: hashParams.jitter,
         sP: hashParams.P, sCn: hashParams.numContinents, sNs: hashParams.roughness,
@@ -1888,6 +2095,20 @@ if (hashParams) {
     }
     generate(hashParams.seed, hashParams.toggledIndices, onProgress, shouldSkipClimate());
 } else {
-    generate(undefined, [], onProgress, shouldSkipClimate());
+    // ── Auto-restore last active system from localStorage ─────────────────
+    // window._enterSystemMode is set by initSolarSystem IIFE (defined above)
+    const registry   = loadRegistry();
+    const activeId   = registry.activeSystemId;
+    const savedEntry = registry.systems.find(s => s.id === activeId);
+    if (savedEntry?.type === 'sol') {
+        // Defer so animate() has started before we switch to orrery view
+        setTimeout(() => window._enterSystemMode(OUR_SOLAR_SYSTEM), 0);
+    } else if (savedEntry?.type === 'random' && savedEntry.seed) {
+        setTimeout(() => {
+            window._enterSystemMode(generateSystem(savedEntry.seed));
+        }, 0);
+    } else {
+        generate(undefined, [], onProgress, shouldSkipClimate());
+    }
 }
 animate();

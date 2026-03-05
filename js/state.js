@@ -38,10 +38,16 @@ export const state = {
     solarSystemMode: false,
     // The current system object { name, seed, bodies[] } — null when not in system mode
     currentSystem: null,
+    // Stable string ID for the active system: "sol" or "random-{seed}"
+    currentSystemId: null,
     // ID of the body currently displayed as a globe (null = no body active)
     activeBodyId: null,
     // Map of bodyId → generation result (state.curData equivalent) — cached per body
+    // Points into systemCaches[currentSystemId] so it survives system-switching
     generatedBodies: new Map(),
+    // Per-system caches: { [systemId]: Map<bodyId, {curData}> }
+    // Keyed by systemId so switching back to a visited system never loses its cache
+    systemCaches: {},
     // Queue of body IDs waiting for background generation
     bodyQueue: [],
     // true while a body is being silently background-generated (suppresses buildMesh)
