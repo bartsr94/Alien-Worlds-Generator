@@ -38,7 +38,20 @@ All three are considered together; ties are broken in the order above.
 - **Detailed visualization** — twenty-eight selectable inspection layers organized by category (Geology, Atmosphere, Ocean, Climate, Planetary, Elevation) for viewing each component in isolation. Wind/pressure layers show directional wind arrows, ocean current layers show current arrows colored by heat transport, on both globe and map views. Precipitation layers use a brown→green→blue ramp showing dry to wet regions.
 - **Map export** — download high-resolution equirectangular PNGs (color terrain, satellite biome, climate/Köppen, B&W heightmap, land-only heightmap, or B&W land mask) at configurable widths up to 65536px with tiled rendering. **Export All** downloads Satellite, Climate, Heightmap, and Land Mask in one click, auto-computing climate if needed.
 
+### Solar System Mode
+
+Click the **⊙ System** button in the sidebar header to enter Solar System Mode, a 2D top-down orrery that lets you explore an entire solar system and drill into any rocky or icy world.
+
+- **Our Solar System** — browse a faithful model of Sol, from Mercury through Neptune, with asteroid belt. Each rocky/icy body uses real physical parameters (gravity, atmosphere, temperature, etc.) so drilling into Mars produces a Mars-like world.
+- **Random System** — procedurally generate an alien solar system with a seeded star, 3–7 rocky planets on log-spaced orbits derived from equilibrium temperature, 0–3 gas giants, and an optional asteroid belt.
+- **Orrery view** — planets orbit in real time using log-scaled AU distances (so inner and outer planets coexist on screen). Orbits are computed with Kepler's equation (Newton-Raphson solver). Hover a body to see its name, type, orbital period, and generation status; click any rocky/icy body to generate and view it as a full globe.
+- **Background generation** — all rocky/icy bodies in the system are queued for silent background generation. A ✓ badge appears in the body list and orrery label as each one finishes. Clicking an already-generated body restores it instantly.
+- **Game clock** — a top-center clock bar shows the current in-game date and four speed controls (1×, 10×, 100×, 1000× days/second). Click ⏸/▶ to pause or resume orbital motion.
+- **Return to orrery** — while viewing a body's globe, a floating **⊙ System** back-button returns to the orrery without discarding the generated planet.
+- **Exit system mode** — clicking **⊙ System** again while in the orrery returns to standalone planet-generation mode, restoring the previously generated globe.
+
 ## Quick Start
+
 
 Serve the project with any local HTTP server (required for ES modules):
 
@@ -150,7 +163,26 @@ Click **Export Map** (below Visual Options) to open the export modal:
 - **Export All** — downloads four maps (Satellite, Climate, Land Heightmap, Land Mask) sequentially. If climate hasn't been computed yet, it runs automatically before exporting.
 - A progress overlay shows rendering and PNG encoding status during export
 
+### Solar System Controls
+
+| Control | Location | Description |
+|---------|----------|-------------|
+| ⊙ System | Sidebar header | Open/close Solar System Mode |
+| ⊙ Our Solar System | System Panel | Load our solar system (Sol through Neptune) |
+| ⚄ Random System | System Panel | Generate a new procedural alien system |
+| Body list | System Panel | Click any rocky/icy body name to generate and view it |
+| ← Back to System | Floating button | Return to orrery from a body's globe view |
+| ⏸ / ▶ | Clock bar (top) | Pause or resume orbital time |
+| 1× / 10× / 100× / 1000× | Clock bar (top) | Set orbital simulation speed (days/second) |
+
+In the orrery view:
+- **Pan** — drag with the mouse (or one finger on mobile) to scroll the orrery
+- **Zoom** — scroll wheel (or pinch on mobile) to zoom in/out
+- **Hover** — hover over a body to see its name, type, orbital period, and generation status in the info card
+- **Click** — click a rocky or icy world to drill into it and generate a full globe
+
 ### Sidebar & Loading
+
 
 The control panel can be collapsed and expanded with the **«** toggle button in the sidebar header. On small screens (≤ 768px) the sidebar becomes a bottom sheet with a drag handle — starts collapsed, showing only the handle and header. Drag up or tap the handle to expand. A fullscreen overlay with spinner, title, and progress bar appears during every generation — fully opaque on initial load, semi-transparent on subsequent builds so the previous planet is dimmed behind it. Stage labels (shaping, plates, oceans, mountains, painting) update as the pipeline progresses.
 
@@ -230,8 +262,12 @@ CNAME                   Custom domain config (orogen.studio)
 404.html                Custom 404 page
 preview.png             Social preview image (og:image / Twitter card)
 js/
-  main.js               Entry point — UI wiring, animation loop
+  main.js               Entry point — UI wiring, animation loop, solar system wiring
   state.js              Shared mutable application state
+  solar-system.js       Solar system body definitions (OUR_SOLAR_SYSTEM) and procedural system generator (generateSystem)
+  game-clock.js         Compressed game-time clock — speed levels, Julian Day calendar, pause/resume
+  orrery.js             2D top-down orrery — Kepler orbit solver, Three.js orbit rings and body meshes, HTML label overlay, raycasting
+  system-planet-params.js  Adapter bridging solar system body params to planet-generator slider values
   generate.js           Worker dispatcher — posts jobs, handles results
   planet-worker.js      Web Worker — runs geology pipeline off main thread
   planet-code.js        Planet code encode/decode (seed + sliders → base36)
@@ -252,7 +288,7 @@ js/
   precipitation.js      Precipitation simulation — moisture advection, ITCZ/frontal/orographic effects, blended with heuristic
   heuristic-precip.js   Heuristic zonal precipitation model — smooth latitude/continentality/orographic patterns
   temperature.js        Temperature simulation — ITCZ thermal equator, lapse rate, continentality, ocean currents
-  koppen.js             Köppen climate classification — alien-temperature-aware; 30 standard types + 4 alien (X) zones (XD Cryo-Desert, XF Deep Freeze, XS Scorched, XV Hellscape), temperature decoded at planet's actual thermal range
+  koppen.js             Köppen climate classification — alien-temperature-aware; 30 standard types + 5 alien (X) zones (XD Cryo-Desert, XF Deep Freeze, XP Primordial, XS Scorched, XV Hellscape), temperature decoded at planet's actual thermal range
   scene.js              Three.js scene, cameras, controls, lights
   planet-mesh.js        Voronoi mesh, map projection, hover highlight
   edit-mode.js          Ctrl-click plate toggle + hover info

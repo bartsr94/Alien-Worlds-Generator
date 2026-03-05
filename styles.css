@@ -38,7 +38,7 @@ body { background: #000; overflow: hidden; font-family: 'Segoe UI', system-ui, s
 }
 #sidebarToggle:hover { background: rgba(255,255,255,0.12); color: #fff; }
 #ui.collapsed { min-width: 0; padding: 12px; }
-#ui.collapsed #sidebarHeader > div { display: none; }
+#ui.collapsed #sidebarHeader > div:first-child { display: none; }
 #ui.collapsed #sidebarContent { display: none; }
 #ui.collapsed #sidebarHeader { margin-bottom: 0; }
 .section { margin-bottom: 6px; }
@@ -806,4 +806,187 @@ button#generate.generating {
     button#generate { padding: 12px; font-size: 15px; }
     .cg label { font-size: 14px; }
     .section summary { font-size: 13px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SOLAR SYSTEM / ORRERY STYLES
+═══════════════════════════════════════════════════════════════════════════ */
+
+/* Sidebar header buttons row */
+.sidebar-header-buttons {
+    display: flex; align-items: center; gap: 6px;
+}
+
+/* ⊙ System button in sidebar header */
+#systemBtn {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 6px;
+    color: #9ab; height: 28px; padding: 0 8px;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.03em;
+    cursor: pointer; white-space: nowrap;
+    display: flex; align-items: center; gap: 4px;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+    flex-shrink: 0;
+}
+#systemBtn:hover { background: rgba(255,255,255,0.12); color: #fff; border-color: rgba(255,180,60,0.4); }
+#systemBtn.active { background: rgba(255,180,60,0.15); color: #ffd080; border-color: rgba(255,180,60,0.5); }
+
+/* ── System panel (replaces planet sliders when in system mode) ── */
+#systemPanel { padding: 0 0 8px; }
+.system-header { margin-bottom: 12px; }
+
+/* Body-view banner: compact header shown at the top of sidebar when viewing a body from the orrery */
+#bodyViewBanner {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0 10px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+#bodyViewBanner.hidden { display: none; }
+.body-banner-back {
+    font-size: 12px; padding: 3px 8px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 5px; color: #9ab; cursor: pointer;
+    white-space: nowrap; flex-shrink: 0;
+    transition: background 0.2s, color 0.2s;
+}
+.body-banner-back:hover { background: rgba(255,255,255,0.14); color: #fff; }
+.body-banner-name {
+    font-size: 14px; font-weight: 600; color: #dde;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.system-name {
+    font-size: 17px; font-weight: 700; color: #ffd080; letter-spacing: 0.03em;
+    margin-bottom: 8px;
+}
+.system-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn-secondary {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.14); border-radius: 6px;
+    color: #bcd; padding: 6px 10px; font-size: 12px; cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+.btn-secondary:hover { background: rgba(255,255,255,0.14); color: #fff; }
+
+/* Body list */
+.body-list { display: flex; flex-direction: column; gap: 2px; }
+.body-list-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 6px; cursor: pointer;
+    transition: background 0.15s;
+    border: 1px solid transparent;
+}
+.body-list-item:hover { background: rgba(255,255,255,0.07); }
+.body-list-item.active { background: rgba(255,200,80,0.1); border-color: rgba(255,200,80,0.25); }
+.body-list-item.no-globe { cursor: default; opacity: 0.55; }
+.body-list-item.no-globe:hover { background: transparent; }
+.body-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}
+.body-item-name { font-size: 13px; font-weight: 500; flex: 1; }
+.body-item-type { font-size: 11px; color: #778; }
+.body-status {
+    font-size: 10px; padding: 1px 5px; border-radius: 3px;
+    background: rgba(255,255,255,0.07); color: #889;
+}
+.body-status.ready { background: rgba(80,200,120,0.15); color: #7dc; }
+.body-status.active { background: rgba(255,200,80,0.15); color: #fcc; }
+
+.system-back-btn {
+    margin-top: 10px; width: 100%;
+    border-radius: 6px; padding: 7px;
+    font-size: 13px; text-align: center;
+}
+
+/* ── System clock bar ── */
+#systemBar {
+    position: fixed;
+    top: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(6,6,20,0.88); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
+    padding: 6px 14px;
+    display: flex; align-items: center; gap: 14px;
+    z-index: 80; pointer-events: auto;
+    transition: opacity 0.2s;
+}
+#systemBar.hidden { display: none; }
+.game-date {
+    font-size: 13px; font-weight: 600; color: #ffd080;
+    letter-spacing: 0.05em; font-family: 'Courier New', monospace;
+    min-width: 110px; text-align: center;
+}
+.clock-controls { display: flex; gap: 4px; align-items: center; }
+.clock-btn {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 5px;
+    color: #aab; width: 28px; height: 28px;
+    font-size: 11px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s;
+    padding: 0;
+}
+.clock-btn:hover { background: rgba(255,255,255,0.14); color: #fff; }
+.clock-btn.active { background: rgba(255,200,80,0.2); color: #ffd080; border-color: rgba(255,200,80,0.35); }
+.clock-btn.paused-state { background: rgba(255,80,80,0.15); color: #f88; border-color: rgba(255,80,80,0.3); }
+
+/* ── Back to System floating button ── */
+#backToSystem {
+    position: fixed; top: 14px; left: 320px;
+    background: rgba(6,6,20,0.88); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,200,80,0.3); border-radius: 8px;
+    color: #ffd080; padding: 7px 14px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    z-index: 80;
+    transition: background 0.2s, border-color 0.2s, left 0.25s;
+}
+#backToSystem:hover { background: rgba(20,20,50,0.92); border-color: rgba(255,200,80,0.6); }
+#backToSystem.hidden { display: none; }
+
+/* ── Body hover info card (shown on orrery body hover) ── */
+#bodyInfoCard {
+    position: fixed; bottom: 24px; right: 24px;
+    background: rgba(6,6,20,0.9); backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 10px;
+    padding: 12px 16px; min-width: 180px;
+    z-index: 80;
+    transition: opacity 0.15s;
+}
+#bodyInfoCard.hidden { display: none; }
+.body-info-name { font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 3px; }
+.body-info-type { font-size: 12px; color: #8ab; text-transform: capitalize; margin-bottom: 6px; }
+.body-info-orbit { font-size: 12px; color: #9ab; margin-bottom: 3px; }
+.body-info-status { font-size: 11px; color: #67a; }
+
+/* ── Orrery HTML labels ── */
+#orreryLabels {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 70;
+}
+.orrery-label {
+    position: absolute;
+    font-size: 11px; font-weight: 500; color: rgba(200,210,230,0.75);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+    white-space: nowrap; pointer-events: none;
+    transform: translateY(-50%);
+}
+
+/* ── Collapsed sidebar: keep system button visible ── */
+#ui.collapsed .sidebar-header-buttons { gap: 4px; flex-direction: column; }
+
+/* Hides planet-controls sections while in solar system mode */
+.system-hidden { display: none !important; }
+
+/* In system mode: hide planet sections, show system panel */
+#sidebarContent[data-systemmode] > :not(#systemPanel) {
+    display: none;
+}
+#sidebarContent[data-systemmode] > #systemPanel { display: block; }
+
+/* ── Mobile adjustments ── */
+@media (max-width: 768px) {
+    #systemBar { top: auto; bottom: calc(var(--sheet-visible-height, 72px) + 12px); }
+    #backToSystem { left: 16px; top: auto; bottom: calc(var(--sheet-visible-height, 72px) + 52px); }
+    #bodyInfoCard { bottom: calc(var(--sheet-visible-height, 72px) + 12px); right: 12px; }
+    #systemBtn { height: 44px; padding: 0 12px; font-size: 13px; }
 }

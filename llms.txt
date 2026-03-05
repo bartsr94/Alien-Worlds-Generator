@@ -14,6 +14,7 @@ World Orogen generates realistic procedural planets shaped by tectonic plate sim
 - Creates hotspot volcanism with drift-trail island chains (like Hawaii)
 - Allows interactive editing — click any tectonic plate to reshape continents in real time
 - Supports a full Planetary Physics layer — gravity, atmosphere, hydrosphere, base temperature, and axial tilt flow through the entire simulation pipeline. Nine world presets (Earth-like, Mars-like, Venus-like, Titan-like, Dead Rock, Ocean World, Ice Ball, Arid Desert, High Gravity, or Random Alien) produce genuinely alien worlds with adapted biome colors, atmosphere glow, atmospheric haze sphere, and fluid behavior
+- Includes a Solar System Mode (⊙ System button): a 2D top-down real-time orrery powered by Kepler orbital mechanics. Browse our Solar System (Sun through Neptune) or generate a random procedural alien system. Click any rocky or icy world to generate its full globe. Bodies are queued for silent background generation; a game clock with 1×/10×/100×/1000× time compression drives orbital animation.
 
 ## Who it's for
 
@@ -31,6 +32,7 @@ World Orogen generates realistic procedural planets shaped by tectonic plate sim
 - Köppen climate classification is alien-temperature-aware: temperature decode uses the planet's actual thermal range, so ice worlds (-100°C base temp) never show hot deserts, Venus-class worlds show Hellscape coverage, and hot+wet worlds show Primordial coverage
 - Export high-resolution equirectangular maps up to 65,536px wide
 - Shareable planet codes — copy a compact code to reproduce any planet exactly
+- Solar System Mode: 2D Keplerian orrery for our solar system or a procedural alien system; click any rocky/icy body to view its full generated globe; background queue pre-generates all worlds
 - Works on desktop and mobile browsers
 - No build step, no dependencies to install — pure ES modules
 

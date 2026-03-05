@@ -607,6 +607,9 @@ function oceanCurrentColor(warmth, speed, isOcean) {
 // Build Voronoi mesh — each half-edge produces one triangle.
 export function buildMesh() {
     if (!state.curData) return;
+    // Skip mesh build during silent background generation — curData is already
+    // cached by main.js; the mesh will be built fresh when the user drills in.
+    if (state.isBgGenerating) return;
     const { mesh, r_xyz, t_xyz, r_plate, r_elevation, t_elevation, mountain_r, coastline_r, ocean_r, r_stress, debugLayers } = state.curData;
     const showPlates = document.getElementById('chkPlates').checked;
     const showStress = false;
@@ -855,6 +858,19 @@ export function buildMesh() {
                 if (c.name === 'oceanMap') c.visible = false;
             });
         }
+    }
+
+    // If the orrery is the active view, suppress all planet-side meshes now
+    // so they never flash for a single frame during background generation.
+    if (state.solarSystemMode) {
+        state.planetMesh.visible = false;
+        waterMesh.visible = false;
+        atmosMesh.visible = false;
+        starsMesh.visible = false;
+        if (state.wireMesh) state.wireMesh.visible = false;
+        if (state.arrowGroup) state.arrowGroup.visible = false;
+        if (state.globeGridMesh) state.globeGridMesh.visible = false;
+        if (state.mapGridMesh) state.mapGridMesh.visible = false;
     }
 }
 

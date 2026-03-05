@@ -52,6 +52,7 @@
             "Nine world presets: Earth-like, Mars-like, Venus-like, Titan-like, Dead Rock, Ocean World, Ice Ball, Arid Desert, High Gravity",
             "Atmospheric haze sphere for thick and crushing atmosphere worlds",
             "Interactive plate editing",
+            "Solar System Mode with 2D Keplerian orrery (our solar system + procedural alien systems)",
             "Equirectangular map export up to 65536px",
             "Multiple visualization modes (terrain, satellite, climate, heightmap)",
             "Shareable planet codes"
@@ -128,6 +129,7 @@
             <li>Climate simulation with seasonal wind patterns, ocean currents, precipitation, and K&ouml;ppen climate classification</li>
             <li>Hotspot volcanism with drift-trail island chains (like Hawaii)</li>
             <li>Interactive plate editing — click any plate to toggle between land and ocean</li>
+            <li>Solar System Mode — explore a 2D Keplerian orrery of our solar system or a procedurally generated alien system; click any rocky or icy world to generate its full globe</li>
             <li>Multiple visualization modes: terrain, satellite biome, climate, and heightmap</li>
             <li>28 detailed inspection layers for geology, atmosphere, ocean, climate, and planetary properties</li>
             <li>High-resolution equirectangular map export up to 65,536px wide</li>
@@ -156,9 +158,37 @@
                 <h2>World Orogen</h2>
                 <div class="sub">Build worlds shaped by tectonic forces</div>
             </div>
-            <button id="sidebarToggle" title="Collapse panel">&#x00AB;</button>
+            <div class="sidebar-header-buttons">
+                <button id="systemBtn" title="Solar System view">&#x2609; System</button>
+                <button id="sidebarToggle" title="Collapse panel">&#x00AB;</button>
+            </div>
         </div>
         <div id="sidebarContent">
+
+        <!-- Body-view banner: shown when drilling into a solar system body -->
+        <div id="bodyViewBanner" class="hidden">
+            <button id="bodyBannerBackBtn" class="body-banner-back">&#x2190; System</button>
+            <span id="bodyBannerName" class="body-banner-name"></span>
+        </div>
+
+        <!-- Solar System panel — shown instead of planet controls when in system mode -->
+        <div id="systemPanel" class="hidden">
+            <div class="system-header">
+                <div id="systemNameDisplay" class="system-name">Sol System</div>
+                <div class="system-actions">
+                    <button id="solarSystemBtn" class="btn-secondary">&#x2609; Our Solar System</button>
+                    <button id="generateSystemBtn" class="btn-secondary">&#x2684; Random System</button>
+                </div>
+            </div>
+            <details class="section" open>
+                <summary>Bodies</summary>
+                <div class="section-body" style="padding-top:4px">
+                    <div id="bodyList" class="body-list"></div>
+                </div>
+            </details>
+            <button id="backToGlobeBtn" class="btn-ghost system-back-btn hidden">&#x2190; Back to System</button>
+        </div>
+
         <details class="section">
             <summary>Planetary Physics <span class="tip" data-tip="Physical properties of the planet — affects terrain height, erosion, ocean coverage, climate, and visuals.">?</span></summary>
             <div class="section-body">
@@ -393,8 +423,9 @@
             <button id="tutorialClose">&times;</button>
             <div class="tutorial-step" data-step="0">
                 <h3>Welcome to World Orogen</h3>
-                <p>The world's most realistic-ish planet generator.</p>
+                <p>The world's most realistic-ish planet generator &mdash; and solar system explorer.</p>
                 <p>Generate unique procedural planets shaped by tectonic forces &mdash; from familiar Earth-like worlds to alien environments like rust deserts, frozen wastelands, methane seas, and crushing hellscapes. Every world is one of a kind.</p>
+                <p>Click <strong>&#x2609; System</strong> in the sidebar to explore an entire solar system &mdash; browse our Solar System or generate a random alien one, then click any rocky world to generate its full globe.</p>
             </div>
             <div class="tutorial-step" data-step="1">
                 <h3>Shape Your World</h3>
@@ -489,6 +520,32 @@
     </button>
     <div id="hoverInfo"></div>
     <div id="info">Drag to rotate &middot; Scroll to zoom &middot; Ctrl-click to reshape continents</div>
+
+    <!-- Solar System overlays -->
+    <div id="systemBar" class="hidden">
+        <div id="gameDate" class="game-date">Jan 1, 2200</div>
+        <div class="clock-controls">
+            <button id="btnPause" class="clock-btn" title="Pause">&#x23F8;</button>
+            <button id="btnSpeed0" class="clock-btn speed-btn" data-speed="0" title="1 day/s">&#x25B6;</button>
+            <button id="btnSpeed1" class="clock-btn speed-btn active" data-speed="1" title="10 days/s">&#x25B6;&#x25B6;</button>
+            <button id="btnSpeed2" class="clock-btn speed-btn" data-speed="2" title="100 days/s">&#x25B6;&#x25B6;&#x25B6;</button>
+            <button id="btnSpeed3" class="clock-btn speed-btn" data-speed="3" title="1000 days/s">&#x25B6;&#x25B6;&#x25B6;&#x25B6;</button>
+        </div>
+    </div>
+
+    <button id="backToSystem" class="back-to-system hidden" title="Return to Solar System">
+        &#x2609; System
+    </button>
+
+    <div id="bodyInfoCard" class="body-info-card hidden">
+        <div id="bodyInfoName" class="body-info-name"></div>
+        <div id="bodyInfoType" class="body-info-type"></div>
+        <div id="bodyInfoOrbit" class="body-info-orbit"></div>
+        <div id="bodyInfoStatus" class="body-info-status"></div>
+    </div>
+
+    <!-- Orrery body labels (populated dynamically by orrery.js) -->
+    <div id="orreryLabels"></div>
 
     <script type="importmap">
     {

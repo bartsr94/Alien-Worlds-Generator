@@ -32,4 +32,18 @@ export const state = {
     planetaryParams: null,
     // Currently selected world preset name ('earth', 'mars', 'venus', … or 'custom').
     currentPreset: 'custom',
+
+    // ── Solar System mode ────────────────────────────────────────────────────
+    // true when the orrery view is active (planet globe is hidden)
+    solarSystemMode: false,
+    // The current system object { name, seed, bodies[] } — null when not in system mode
+    currentSystem: null,
+    // ID of the body currently displayed as a globe (null = no body active)
+    activeBodyId: null,
+    // Map of bodyId → generation result (state.curData equivalent) — cached per body
+    generatedBodies: new Map(),
+    // Queue of body IDs waiting for background generation
+    bodyQueue: [],
+    // true while a body is being silently background-generated (suppresses buildMesh)
+    isBgGenerating: false,
 };

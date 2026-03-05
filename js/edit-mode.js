@@ -185,6 +185,7 @@ export function setupEditMode() {
     const HOVER_INTERVAL = 50; // ms — cap hover lookups
 
     canvas.addEventListener('pointerdown', (e) => {
+        if (state.solarSystemMode) return;
         if (!state.curData) return;
         const isEditTap = (e.button === 0 && e.ctrlKey) ||
                           (e.button === 0 && state.isTouchDevice && state.editMode);
@@ -201,6 +202,7 @@ export function setupEditMode() {
 
     canvas.addEventListener('pointerup', (e) => {
         orbiting = false;
+        if (state.solarSystemMode) { downInfo = null; return; }
         if (!downInfo || !state.curData || e.button !== 0) { downInfo = null; return; }
 
         const dx = e.clientX - downInfo.x;
@@ -242,6 +244,15 @@ export function setupEditMode() {
     });
 
     canvas.addEventListener('pointermove', (e) => {
+        if (state.solarSystemMode) {
+            // Clear any stale hover state and hide the info card
+            if (state.hoveredPlate >= 0 || state.hoveredRegion >= 0) {
+                state.hoveredPlate = -1;
+                state.hoveredRegion = -1;
+                document.getElementById('hoverInfo').style.display = 'none';
+            }
+            return;
+        }
         if (!state.curData) {
             if (state.hoveredPlate >= 0 || state.hoveredRegion >= 0) {
                 state.hoveredPlate = -1;

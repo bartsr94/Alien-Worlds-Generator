@@ -250,3 +250,106 @@ export function tickMapZoom() {
     mapCamera.zoom = next;
     mapCamera.updateProjectionMatrix();
 }
+
+// ── Orrery camera & controls (2D top-down solar system view) ─────────────────
+// Looks straight down the -Y axis.  Pan and zoom only — no rotation.
+export const orreryCamera = new THREE.OrthographicCamera(-3, 3, 3, -3, 0.1, 200);
+orreryCamera.position.set(0, 80, 0);
+orreryCamera.lookAt(0, 0, 0);
+
+export function updateOrreryCameraFrustum() {
+    const aspect = innerWidth / innerHeight;
+    const halfH  = 3.0;
+    const halfW  = halfH * aspect;
+    orreryCamera.left   = -halfW;
+    orreryCamera.right  =  halfW;
+    orreryCamera.top    =  halfH;
+    orreryCamera.bottom = -halfH;
+    orreryCamera.updateProjectionMatrix();
+}
+updateOrreryCameraFrustum();
+
+export const orreryCtrl = new OrbitControls(orreryCamera, canvas);
+orreryCtrl.enableRotate   = false;
+orreryCtrl.enableDamping  = true;
+orreryCtrl.dampingFactor  = 0.09;
+orreryCtrl.panSpeed       = 1.4;
+orreryCtrl.screenSpacePanning = true;
+orreryCtrl.mouseButtons   = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
+orreryCtrl.touches        = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN };
+orreryCtrl.minZoom        = 0.2;
+orreryCtrl.maxZoom        = 30;
+orreryCtrl.enableZoom     = false; // custom handler below
+orreryCtrl.enabled        = false;
+
+let _orreryZoomTarget   = orreryCamera.zoom;
+const ORRERY_ZOOM_STEP  = 0.88;
+const ORRERY_ZOOM_SMOOTH = 0.12;
+
+canvas.addEventListener('wheel', (e) => {
+    if (!orreryCtrl.enabled) return;
+    e.preventDefault();
+    const dir = Math.sign(e.deltaY);
+    _orreryZoomTarget *= dir < 0 ? 1 / ORRERY_ZOOM_STEP : ORRERY_ZOOM_STEP;
+    _orreryZoomTarget = THREE.MathUtils.clamp(_orreryZoomTarget, orreryCtrl.minZoom, orreryCtrl.maxZoom);
+}, { passive: false });
+
+// Pinch-to-zoom for orrery (touch)
+let _orreryPinchDist = 0;
+canvas.addEventListener('touchstart', (e) => {
+    if (!orreryCtrl.enabled || e.touches.length !== 2) { _orreryPinchDist = 0; return; }
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    _orreryPinchDist = Math.sqrt(dx * dx + dy * dy);
+}, { passive: true });
+
+canvas.addEventListener('touchmove', (e) => {
+    if (!orreryCtrl.enabled || e.touches.length !== 2 || _orreryPinchDist === 0) return;
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const ratio = dist / _orreryPinchDist;
+    _orreryZoomTarget *= ratio;
+    _orreryZoomTarget = THREE.MathUtils.clamp(_orreryZoomTarget, orreryCtrl.minZoom, orreryCtrl.maxZoom);
+    _orreryPinchDist = dist;
+}, { passive: true });
+
+canvas.addEventListener('touchend', () => { _orreryPinchDist = 0; }, { passive: true });
+
+export function tickOrreryZoom() {
+    const cur  = orreryCamera.zoom;
+    const next = THREE.MathUtils.lerp(cur, _orreryZoomTarget, ORRERY_ZOOM_SMOOTH);
+    if (Math.abs(next - cur) < 0.0001) return;
+    orreryCamera.zoom = next;
+    orreryCamera.updateProjectionMatrix();
+}
+
+/**
+ * Switch the renderer into orrery mode: disable planet controls, enable orrery
+ * controls, hide the planet/water/atmosphere meshes, set a deep-space background.
+ * The orrery group visibility is managed separately by orrery.js enterOrrery().
+ */
+export function switchToOrrery() {
+    ctrl.enabled      = false;
+    mapCtrl.enabled   = false;
+    orreryCtrl.enabled = true;
+    // Reset orrery camera to a clean top-down framing
+    orreryCamera.position.set(0, 80, 0);
+    orreryCamera.lookAt(0, 0, 0);
+    _orreryZoomTarget = 1;
+    orreryCamera.zoom = 1;
+    updateOrreryCameraFrustum();
+    orreryCtrl.target.set(0, 0, 0);
+    orreryCtrl.update();
+    scene.background = new THREE.Color(0x000004);
+}
+
+/**
+ * Switch back to the planet globe view after being in the orrery.
+ * The caller is responsible for re-enabling ctrl or mapCtrl.
+ */
+export function switchToPlanetView() {
+    orreryCtrl.enabled = false;
+    scene.background   = new THREE.Color(0x030308);
+    ctrl.enabled       = true;
+}
