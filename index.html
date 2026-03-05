@@ -159,20 +159,21 @@
                 <div class="sub">Build worlds shaped by tectonic forces</div>
             </div>
             <div class="sidebar-header-buttons">
-                <button id="systemBtn" title="Solar System view">&#x2609; System</button>
                 <button id="sidebarToggle" title="Collapse panel">&#x00AB;</button>
             </div>
         </div>
         <div id="sidebarContent">
 
-        <!-- Body-view banner: shown when drilling into a solar system body -->
-        <div id="bodyViewBanner" class="hidden">
-            <button id="bodyBannerBackBtn" class="body-banner-back">&#x2190; System</button>
-            <span id="bodyBannerName" class="body-banner-name"></span>
+        <!-- Navigation row -->
+        <div id="navRow">
+            <button id="navBtnSystem" class="nav-btn" title="Solar System view">&#x2609; System</button>
+            <button id="navBtnWorld" class="nav-btn active" title="Planet building controls">&#x1F30D; World</button>
+            <button id="navBtnVisual" class="nav-btn mobile-only" title="Visual options">&#x25CE; Visual</button>
         </div>
 
-        <!-- Solar System panel — shown instead of planet controls when in system mode -->
-        <div id="systemPanel" class="hidden">
+        <!-- PANEL: System mode (orrery) -->
+        <div id="panelSystem" class="panel">
+        <div id="systemPanel">
             <div class="system-header">
                 <div id="systemNameDisplay" class="system-name">Sol System</div>
                 <div class="system-actions">
@@ -187,6 +188,15 @@
                 </div>
             </details>
             <button id="backToGlobeBtn" class="btn-ghost system-back-btn hidden">&#x2190; Back to System</button>
+        </div>
+        </div><!-- /panelSystem -->
+
+        <!-- PANEL: World building -->
+        <div id="panelWorld" class="panel active">
+        <!-- Body-view banner: shown when drilling into a solar system body -->
+        <div id="bodyViewBanner" class="hidden">
+            <button id="bodyBannerBackBtn" class="body-banner-back">&#x2190; System</button>
+            <span id="bodyBannerName" class="body-banner-name"></span>
         </div>
 
         <details class="section">
@@ -310,107 +320,109 @@
                 <button id="reapplyBtn" title="Reapply terrain sculpting" disabled><span class="reapply-icon">&#x21bb;</span> Reapply</button>
             </div>
         </details>
-        <details class="section" open>
-            <summary>Visual Options</summary>
-            <div class="section-body">
-                <div class="cg">
-                    <label>View</label>
-                    <select id="viewMode">
-                        <option value="globe">Globe</option>
-                        <option value="map">Map</option>
-                    </select>
-                </div>
-                <div class="cg" id="mapCenterLonGroup" style="display:none">
-                    <label>Center Longitude <span class="v" id="vMapCenterLon">0°</span></label>
-                    <input type="range" id="sMapCenterLon" min="-180" max="180" value="0" step="5">
-                </div>
-                <div class="map-tabs" id="mapTabs">
-                    <button class="map-tab active" data-layer="">Terrain</button>
-                    <button class="map-tab" data-layer="biome">Satellite</button>
-                    <button class="map-tab" data-layer="koppen">Climate</button>
-                    <button class="map-tab" data-layer="landheightmap">Heightmap</button>
-                </div>
-                <div class="cg">
-                    <label>Inspect</label>
-                    <select id="debugLayer">
-                        <option value="">Terrain</option>
-                        <option value="biome">Satellite</option>
-                        <option value="koppen">K&ouml;ppen Climate</option>
-                        <option value="landheightmap">Land Heightmap</option>
-                        <optgroup label="Geology">
-                            <option value="base">Base</option>
-                            <option value="tectonic">Tectonic</option>
-                            <option value="noise">Noise</option>
-                            <option value="interior">Interior</option>
-                            <option value="coastal">Coastal</option>
-                            <option value="ocean">Ocean Floor</option>
-                            <option value="hotspot">Hotspot</option>
-                            <option value="tecActivity">Tectonic Activity</option>
-                            <option value="margins">Margins</option>
-                            <option value="backArc">Back-Arc</option>
-                            <option value="foldRidge">Fold Ridge</option>
-                            <option value="erosionDelta">Erosion Delta</option>
-                            <option value="flowAccum">Rivers</option>
-                        </optgroup>
-                        <optgroup label="Atmosphere">
-                            <option value="pressureSummer">Pressure (Summer)</option>
-                            <option value="pressureWinter">Pressure (Winter)</option>
-                            <option value="windSpeedSummer">Wind Speed (Summer)</option>
-                            <option value="windSpeedWinter">Wind Speed (Winter)</option>
-                        </optgroup>
-                        <optgroup label="Ocean">
-                            <option value="oceanCurrentSummer">Currents (Summer)</option>
-                            <option value="oceanCurrentWinter">Currents (Winter)</option>
-                        </optgroup>
-                        <optgroup label="Climate">
-                            <option value="precipSummer">Precipitation (Summer)</option>
-                            <option value="precipWinter">Precipitation (Winter)</option>
-                            <option value="rainShadowSummer">Rain Shadow (Summer)</option>
-                            <option value="rainShadowWinter">Rain Shadow (Winter)</option>
-                            <option value="tempSummer">Temperature (Summer)</option>
-                            <option value="tempWinter">Temperature (Winter)</option>
-                            <option value="continentality">Continentality</option>
-                        </optgroup>
-                        <optgroup label="Planetary">
-                            <option value="hydroState">Hydrosphere State</option>
-                            <option value="habitability">Habitability Index</option>
-                        </optgroup>
-                        <optgroup label="Elevation">
-                            <option value="heightmap">Full Heightmap</option>
-                        </optgroup>
-                    </select>
-                </div>
-                <div id="vizLegend" class="viz-legend"></div>
-                <div class="tg">
-                    <label class="toggle-label"><input type="checkbox" id="chkWire"><span class="toggle-track"><span class="toggle-thumb"></span></span>Wireframe</label>
-                    <label class="toggle-label"><input type="checkbox" id="chkPlates"><span class="toggle-track"><span class="toggle-thumb"></span></span>Show Plates</label>
-                    <label class="toggle-label"><input type="checkbox" id="chkRotate"><span class="toggle-track"><span class="toggle-thumb"></span></span>Auto-Rotate</label>
-                    <label class="toggle-label"><input type="checkbox" id="chkGrid" checked><span class="toggle-track"><span class="toggle-thumb"></span></span>Grid Lines</label>
-                </div>
-                <div class="cg" id="gridSpacingGroup">
-                    <label>Grid Spacing</label>
-                    <select id="gridSpacing">
-                        <option value="30">30°</option>
-                        <option value="15" selected>15°</option>
-                        <option value="10">10°</option>
-                        <option value="5">5°</option>
-                        <option value="2.5">2.5°</option>
-                    </select>
-                </div>
-                <details id="statsDetails" class="stats-toggle">
-                    <summary>Stats</summary>
-                    <div id="stats"></div>
-                </details>
+        </div><!-- /panelWorld -->
+
+        <!-- PANEL: Visual (mobile — #vizWidget gets moved here by JS on touch devices) -->
+        <div id="panelVisual" class="panel"></div>
+
+        </div><!-- /sidebarContent -->
+    </div><!-- /ui -->
+    <div id="vizWidget">
+        <select id="viewMode">
+            <option value="globe">Globe</option>
+            <option value="map">Map</option>
+        </select>
+        <div class="map-tabs" id="mapTabs">
+            <button class="map-tab active" data-layer="">Terrain</button>
+            <button class="map-tab" data-layer="biome">Satellite</button>
+            <button class="map-tab" data-layer="koppen">Climate</button>
+            <button class="map-tab" data-layer="landheightmap">Heightmap</button>
+        </div>
+        <button id="layersBtn" title="Inspection layers and options">&#x22EF;</button>
+        <div id="layersPopup">
+            <div class="cg" id="mapCenterLonGroup" style="display:none">
+                <label>Center Longitude <span class="v" id="vMapCenterLon">0&#x00B0;</span></label>
+                <input type="range" id="sMapCenterLon" min="-180" max="180" value="0" step="5">
             </div>
-        </details>
-        <button id="exportBtn" class="export-btn">Export Map</button>
-        <a id="repoLink" href="https://github.com/raguilar011095/planet_heightmap_generation" target="_blank" rel="noopener">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.64 7.64 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-            GitHub
-        </a>
+            <div class="cg">
+                <label>Inspect</label>
+                <select id="debugLayer">
+                    <option value="">Terrain</option>
+                    <option value="biome">Satellite</option>
+                    <option value="koppen">K&ouml;ppen Climate</option>
+                    <option value="landheightmap">Land Heightmap</option>
+                    <optgroup label="Geology">
+                        <option value="base">Base</option>
+                        <option value="tectonic">Tectonic</option>
+                        <option value="noise">Noise</option>
+                        <option value="interior">Interior</option>
+                        <option value="coastal">Coastal</option>
+                        <option value="ocean">Ocean Floor</option>
+                        <option value="hotspot">Hotspot</option>
+                        <option value="tecActivity">Tectonic Activity</option>
+                        <option value="margins">Margins</option>
+                        <option value="backArc">Back-Arc</option>
+                        <option value="foldRidge">Fold Ridge</option>
+                        <option value="erosionDelta">Erosion Delta</option>
+                        <option value="flowAccum">Rivers</option>
+                    </optgroup>
+                    <optgroup label="Atmosphere">
+                        <option value="pressureSummer">Pressure (Summer)</option>
+                        <option value="pressureWinter">Pressure (Winter)</option>
+                        <option value="windSpeedSummer">Wind Speed (Summer)</option>
+                        <option value="windSpeedWinter">Wind Speed (Winter)</option>
+                    </optgroup>
+                    <optgroup label="Ocean">
+                        <option value="oceanCurrentSummer">Currents (Summer)</option>
+                        <option value="oceanCurrentWinter">Currents (Winter)</option>
+                    </optgroup>
+                    <optgroup label="Climate">
+                        <option value="precipSummer">Precipitation (Summer)</option>
+                        <option value="precipWinter">Precipitation (Winter)</option>
+                        <option value="rainShadowSummer">Rain Shadow (Summer)</option>
+                        <option value="rainShadowWinter">Rain Shadow (Winter)</option>
+                        <option value="tempSummer">Temperature (Summer)</option>
+                        <option value="tempWinter">Temperature (Winter)</option>
+                        <option value="continentality">Continentality</option>
+                    </optgroup>
+                    <optgroup label="Planetary">
+                        <option value="hydroState">Hydrosphere State</option>
+                        <option value="habitability">Habitability Index</option>
+                    </optgroup>
+                    <optgroup label="Elevation">
+                        <option value="heightmap">Full Heightmap</option>
+                    </optgroup>
+                </select>
+            </div>
+            <div id="vizLegend" class="viz-legend"></div>
+            <div class="tg">
+                <label class="toggle-label"><input type="checkbox" id="chkWire"><span class="toggle-track"><span class="toggle-thumb"></span></span>Wireframe</label>
+                <label class="toggle-label"><input type="checkbox" id="chkPlates"><span class="toggle-track"><span class="toggle-thumb"></span></span>Show Plates</label>
+                <label class="toggle-label"><input type="checkbox" id="chkRotate"><span class="toggle-track"><span class="toggle-thumb"></span></span>Auto-Rotate</label>
+                <label class="toggle-label"><input type="checkbox" id="chkGrid" checked><span class="toggle-track"><span class="toggle-thumb"></span></span>Grid Lines</label>
+            </div>
+            <div class="cg" id="gridSpacingGroup">
+                <label>Grid Spacing</label>
+                <select id="gridSpacing">
+                    <option value="30">30&#x00B0;</option>
+                    <option value="15" selected>15&#x00B0;</option>
+                    <option value="10">10&#x00B0;</option>
+                    <option value="5">5&#x00B0;</option>
+                    <option value="2.5">2.5&#x00B0;</option>
+                </select>
+            </div>
+            <details id="statsDetails" class="stats-toggle">
+                <summary>Stats</summary>
+                <div id="stats"></div>
+            </details>
+            <button id="exportBtn" class="export-btn">Export Map</button>
+            <a id="repoLink" href="https://github.com/raguilar011095/planet_heightmap_generation" target="_blank" rel="noopener">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.64 7.64 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+                GitHub
+            </a>
         </div>
     </div>
-    <select id="mobileViewSwitch" class="mobile-view-switch">
+    <select id="mobileViewSwitch" class="mobile-view-switch" style="display:none">
         <option value="">Terrain</option>
         <option value="biome">Satellite</option>
         <option value="koppen">Climate</option>

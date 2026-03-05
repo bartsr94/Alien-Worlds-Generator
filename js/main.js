@@ -1159,6 +1159,37 @@ window.addEventListener('orientationchange', () => {
     }, 100);
 });
 
+// ── Panel switching (nav row) ─────────────────────────────────────────────
+function switchPanel(kind) {
+    const cap = kind.charAt(0).toUpperCase() + kind.slice(1);
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('panel' + cap)?.classList.add('active');
+    document.getElementById('navBtn'  + cap)?.classList.add('active');
+}
+
+// ── Bottom-right layers popup ─────────────────────────────────────────────
+(function initLayersPopup() {
+    const vizWidget = document.getElementById('vizWidget');
+    const layersBtn = document.getElementById('layersBtn');
+    if (!layersBtn || !vizWidget) return;
+    layersBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        vizWidget.classList.toggle('popup-open');
+    });
+    document.addEventListener('click', (e) => {
+        if (!vizWidget.contains(e.target)) vizWidget.classList.remove('popup-open');
+    });
+})();
+
+// ── On touch/mobile: move #vizWidget inside #panelVisual so it scrolls in the sheet ──
+(function initMobileVizWidget() {
+    if (!state.isTouchDevice && window.innerWidth > 768) return;
+    const panelVisual = document.getElementById('panelVisual');
+    const vizWidget   = document.getElementById('vizWidget');
+    if (panelVisual && vizWidget) panelVisual.appendChild(vizWidget);
+})();
+
 // Animation loop
 // ═══════════════════════════════════════════════════════════════════════════
 // SOLAR SYSTEM MODE
@@ -1269,9 +1300,8 @@ window.addEventListener('orientationchange', () => {
         switchToPlanetView();
         state.solarSystemMode = false;
 
-        // Switch sidebar to planet-controls mode
-        const sc = document.getElementById('sidebarContent');
-        if (sc) delete sc.dataset.systemmode;
+        // Switch sidebar to World panel
+        switchPanel('world');
         systemPanel?.classList.add('hidden');
         const banner = document.getElementById('bodyViewBanner');
         const bannerName = document.getElementById('bodyBannerName');
@@ -1338,9 +1368,7 @@ window.addEventListener('orientationchange', () => {
         if (hoverEl) hoverEl.style.display = 'none';
 
         // Restore system panel in sidebar, hide body-view banner
-        const sc = document.getElementById('sidebarContent');
-        if (sc) sc.dataset.systemmode = '1';
-        systemPanel?.classList.remove('hidden');
+        switchPanel('system');
         document.getElementById('bodyViewBanner')?.classList.add('hidden');
 
         backToSysEl?.classList.add('hidden');
@@ -1371,9 +1399,7 @@ window.addEventListener('orientationchange', () => {
         resetClock();
 
         // Show system panel in sidebar, hide the normal planet controls
-        const sc = document.getElementById('sidebarContent');
-        if (sc) sc.dataset.systemmode = '1';
-        systemPanel?.classList.remove('hidden');
+        switchPanel('system');
 
         // Update system name
         if (systemNameEl) systemNameEl.textContent = system.name;
@@ -1389,8 +1415,6 @@ window.addEventListener('orientationchange', () => {
         initOrrery(system);
         enterOrrery();
 
-        // Mark system button as active
-        systemBtn?.classList.add('active');
         backToSysEl?.classList.add('hidden');
         backToGlobeBtn?.classList.add('hidden');
 
@@ -1414,9 +1438,7 @@ window.addEventListener('orientationchange', () => {
         state.isBgGenerating   = false;
         state.bodyQueue        = [];
 
-        const sc = document.getElementById('sidebarContent');
-        if (sc) delete sc.dataset.systemmode;
-        systemPanel?.classList.add('hidden');
+        switchPanel('world');
         document.getElementById('bodyViewBanner')?.classList.add('hidden');
         document.querySelectorAll('.system-hidden')
             .forEach(el => el.classList.remove('system-hidden'));
@@ -1435,8 +1457,6 @@ window.addEventListener('orientationchange', () => {
         }
         starsMesh.visible = true;
         if (state.wireMesh) state.wireMesh.visible = true;
-
-        systemBtn?.classList.remove('active');
     }
 
     // ── Background queue: generate bodies silently ────────────────────────────
@@ -1525,18 +1545,28 @@ window.addEventListener('orientationchange', () => {
     updateSpeedBtns();
 
     // ── Button wiring ─────────────────────────────────────────────────────────
-    systemBtn?.addEventListener('click', () => {
-        if (state.solarSystemMode) {
-            // If in orrery, exit system mode
-            exitSystemMode();
-        } else if (state.activeBodyId) {
-            // If in a body's planet view, go back to orrery
-            backToSystem();
+    // ── Nav button wiring ─────────────────────────────────────────────────────
+    const navBtnSystem = document.getElementById('navBtnSystem');
+    const navBtnWorld  = document.getElementById('navBtnWorld');
+    const navBtnVisual = document.getElementById('navBtnVisual');
+
+    navBtnSystem?.addEventListener('click', () => {
+        if (state.activeBodyId) {
+            backToSystem(); // returns to orrery, calls switchPanel('system')
+        } else if (!state.solarSystemMode) {
+            enterSystemMode(state.currentSystem ?? OUR_SOLAR_SYSTEM); // calls switchPanel('system')
         } else {
-            // Enter system mode with the current system (or our solar system)
-            enterSystemMode(state.currentSystem ?? OUR_SOLAR_SYSTEM);
+            switchPanel('system'); // already in orrery, ensure correct panel
         }
     });
+    navBtnWorld?.addEventListener('click', () => {
+        if (state.solarSystemMode) {
+            exitSystemMode(); // calls switchPanel('world')
+        } else {
+            switchPanel('world');
+        }
+    });
+    navBtnVisual?.addEventListener('click', () => switchPanel('visual'));
 
     if (solarSysBtn) {
         solarSysBtn.addEventListener('click', () => {

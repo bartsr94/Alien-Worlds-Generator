@@ -37,6 +37,138 @@ body { background: #000; overflow: hidden; font-family: 'Segoe UI', system-ui, s
     transition: background 0.2s, color 0.2s;
 }
 #sidebarToggle:hover { background: rgba(255,255,255,0.12); color: #fff; }
+
+/* ── Navigation row ── */
+#navRow {
+    display: flex;
+    gap: 4px;
+    padding: 4px 0 10px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.nav-btn {
+    flex: 1;
+    padding: 9px 0;
+    background: rgba(255,255,255,0.04);
+    color: #778;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    letter-spacing: 0.02em;
+}
+.nav-btn:hover { background: rgba(255,255,255,0.08); color: #aac; }
+.nav-btn.active {
+    background: rgba(68,136,255,0.18);
+    color: #8af;
+    border-color: rgba(68,136,255,0.25);
+}
+.mobile-only { display: none; }
+
+/* ── Panel swap ── */
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* ── Bottom-right viz widget ── */
+#vizWidget {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(8,8,28,0.88);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 6px 10px;
+    user-select: none;
+}
+#vizWidget #viewMode {
+    background: rgba(255,255,255,0.06);
+    color: #9ab;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    outline: none;
+}
+#vizWidget #viewMode option { background: #12122a; color: #cde; }
+#vizWidget .map-tabs { margin-bottom: 0; }
+#vizWidget .map-tab { padding: 6px 10px; font-size: 11px; }
+
+#layersBtn {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    color: #9ab;
+    width: 28px; height: 28px;
+    font-size: 20px; line-height: 1;
+    font-family: inherit;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.2s, color 0.2s;
+    padding: 0; flex-shrink: 0;
+}
+#layersBtn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+
+#layersPopup {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    min-width: 290px;
+    max-height: 65vh;
+    overflow-y: auto;
+    background: rgba(8,8,28,0.95);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 14px;
+}
+#vizWidget.popup-open #layersPopup { display: block; }
+
+/* ── When #vizWidget is inside #panelVisual (mobile) ── */
+#panelVisual #vizWidget {
+    display: flex;  /* override the media-query display:none */
+    position: static;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    backdrop-filter: none;
+    gap: 0;
+}
+#panelVisual #vizWidget #viewMode {
+    width: 100%;
+    margin-bottom: 8px;
+}
+#panelVisual #vizWidget .map-tabs {
+    width: 100%;
+    margin-bottom: 8px;
+}
+#panelVisual #vizWidget #layersBtn { display: none; }
+#panelVisual #vizWidget #layersPopup {
+    position: static;
+    display: block;
+    max-height: none;
+    background: none;
+    border: none;
+    backdrop-filter: none;
+    padding: 0;
+    margin-top: 0;
+    min-width: 0;
+}
+
 #ui.collapsed { min-width: 0; padding: 12px; }
 #ui.collapsed #sidebarHeader > div:first-child { display: none; }
 #ui.collapsed #sidebarContent { display: none; }
@@ -699,9 +831,11 @@ button#generate.generating {
     /* Hide desktop sidebar toggle */
     #sidebarToggle { display: none; }
 
-    /* Mobile view switcher — to the left of the help button */
+    .mobile-only { display: flex; }
+
+    /* Mobile view switcher — hidden in new layout (replaced by vizWidget tabs in Visual panel) */
     .mobile-view-switch {
-        display: block;
+        display: none;
         position: fixed; top: 16px; left: 16px;
         width: calc(100vw - 16px - 44px - 16px - 12px);
         background: rgba(40,60,120,0.7); backdrop-filter: blur(12px);
@@ -898,6 +1032,7 @@ button#generate.generating {
     border-radius: 6px; padding: 7px;
     font-size: 13px; text-align: center;
 }
+#backToGlobeBtn.hidden { display: none; }
 
 /* ── System clock bar ── */
 #systemBar {
@@ -920,11 +1055,11 @@ button#generate.generating {
 .clock-btn {
     background: rgba(255,255,255,0.07);
     border: 1px solid rgba(255,255,255,0.12); border-radius: 5px;
-    color: #aab; width: 28px; height: 28px;
-    font-size: 11px; cursor: pointer;
+    color: #aab; height: 28px; min-width: 28px;
+    font-size: 10px; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     transition: background 0.15s, color 0.15s;
-    padding: 0;
+    padding: 0 6px; letter-spacing: -1px;
 }
 .clock-btn:hover { background: rgba(255,255,255,0.14); color: #fff; }
 .clock-btn.active { background: rgba(255,200,80,0.2); color: #ffd080; border-color: rgba(255,200,80,0.35); }
@@ -977,16 +1112,13 @@ button#generate.generating {
 /* Hides planet-controls sections while in solar system mode */
 .system-hidden { display: none !important; }
 
-/* In system mode: hide planet sections, show system panel */
-#sidebarContent[data-systemmode] > :not(#systemPanel) {
-    display: none;
-}
-#sidebarContent[data-systemmode] > #systemPanel { display: block; }
-
 /* ── Mobile adjustments ── */
 @media (max-width: 768px) {
     #systemBar { top: auto; bottom: calc(var(--sheet-visible-height, 72px) + 12px); }
     #backToSystem { left: 16px; top: auto; bottom: calc(var(--sheet-visible-height, 72px) + 52px); }
     #bodyInfoCard { bottom: calc(var(--sheet-visible-height, 72px) + 12px); right: 12px; }
-    #systemBtn { height: 44px; padding: 0 12px; font-size: 13px; }
+    /* Bottom-right widget is hidden on mobile — Visual panel in the sheet replaces it */
+    #vizWidget { display: none; }
+    /* Nav buttons need comfy touch targets */
+    .nav-btn { padding: 12px 0; font-size: 13px; }
 }
