@@ -322,7 +322,7 @@ button#generate.generating {
 .map-tab {
     flex: 1; padding: 8px 0; border: none;
     background: transparent; color: #889;
-    font-size: 12px; font-weight: 500; font-family: inherit;
+    font-size: 11px; font-weight: 500; font-family: inherit;
     border-radius: 6px; cursor: pointer;
     transition: background 0.2s, color 0.2s;
 }

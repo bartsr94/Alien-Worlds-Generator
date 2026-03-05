@@ -33,7 +33,7 @@ All three are considered together; ties are broken in the order above.
 - **Seasonal wind simulation** — pressure-driven wind patterns with a longitude-varying ITCZ that tracks the thermal equator (~5° over ocean, up to 15-20° over continents), Gaussian pressure bands (subtropical highs, subpolar lows, polar highs), land/sea thermal contrast for monsoon-like pressure reversals, elevation barometric effects, and Coriolis-deflected geostrophic wind with natural cross-equatorial flow reversal. Computed for both summer and winter seasons.
 - **Ocean surface currents** — rule-based geographic gyre simulation driven by wind belts (trade winds, westerlies, polar easterlies) with a longitude-varying ITCZ equatorial countercurrent. Continental shelves are classified as western or eastern boundaries via coast-normal BFS, producing subtropical gyres (CW in NH, CCW in SH) with western boundary intensification (Gulf Stream, Kuroshio effect) and weaker eastern boundary return flow. Detects circumpolar channels for unobstructed eastward currents (Antarctic Circumpolar Current). Currents are colored by heat transport: red = warm poleward flow, blue = cold equatorward flow, black = zonal (neutral). Computed for both summer and winter seasons.
 - **Precipitation** — blended dual-model approach: a complex moisture advection simulation is combined 50-50 with a fast heuristic zonal model. The advection model simulates wind-driven moisture transport from coasts with six mechanisms: ITCZ convective uplift, frontal convergence, orographic rain/shadow, lee cyclogenesis, polar-front precipitation, and subtropical high suppression. The heuristic model provides smooth latitude-based patterns (ITCZ wet belt, subtropical dry belt, mid-latitude recovery, polar dryness) modulated by continentality and orographic effects. Blending the two reduces splotchiness while preserving terrain-informed detail and strengthening subtropical desert formation (~20–35°). Visualized on a brown (dry) → green (moderate) → blue (wet) color ramp. Computed for both summer and winter seasons.
-- **Map type switcher** — first-class Terrain / Satellite / Climate / Heightmap tabs with color legends for each view
+- **Map type switcher** — first-class Terrain / Satellite / Climate / Heightmap / Land HM tabs with color legends for each view
 - **On-demand climate** — optional deferred climate computation; skip climate during generation for faster terrain iteration, compute it on demand when needed
 - **Detailed visualization** — twenty-eight selectable inspection layers organized by category (Geology, Atmosphere, Ocean, Climate, Planetary, Elevation) for viewing each component in isolation. Wind/pressure layers show directional wind arrows, ocean current layers show current arrows colored by heat transport, on both globe and map views. Precipitation layers use a brown→green→blue ramp showing dry to wet regions.
 - **Map export** — download high-resolution equirectangular PNGs (color terrain, satellite biome, climate/Köppen, B&W heightmap, land-only heightmap, or B&W land mask) at configurable widths up to 65536px with tiled rendering. **Export All** downloads Satellite, Climate, Heightmap, and Land Mask in one click, auto-computing climate if needed.
@@ -46,6 +46,9 @@ Click the **⊙ System** button in the sidebar header to enter Solar System Mode
 - **Random System** — procedurally generate an alien solar system with a seeded star, 3–7 rocky planets on log-spaced orbits derived from equilibrium temperature, 0–3 gas giants, and an optional asteroid belt.
 - **Orrery view** — planets orbit in real time using log-scaled AU distances (so inner and outer planets coexist on screen). Orbits are computed with Kepler's equation (Newton-Raphson solver). Hover a body to see its name, type, orbital period, and generation status; click any rocky/icy body to generate and view it as a full globe.
 - **Background generation** — all rocky/icy bodies in the system are queued for silent background generation. A ✓ badge appears in the body list and orrery label as each one finishes. Clicking an already-generated body restores it instantly.
+- **Session & cross-session persistence** — generated bodies are cached for the entire browser session so switching between systems (Sol → Random → Sol) never re-generates a visited world. The last active system is automatically restored on page reload. Bodies generated in previous sessions show a ✓ badge; clicking them re-generates with any saved overrides applied.
+- **Body param overrides** — modify a body's planetary physics sliders and rebuild to customize it (give Mars a thick atmosphere, give Venus an ocean). Overrides are saved to localStorage and reapplied whenever you return to that body. The **↺ Defaults** button in the body-view banner resets to real-world parameters and clears the saved override.
+- **Saved Systems panel** — a collapsible **Saved Systems** section in the system panel lists all previously visited systems with their type badge (SOL / RANDOM), how many bodies have been explored, and when they were last visited. Load any saved system, rename it by clicking its name, or delete it. The active system is highlighted; a **(modified)** tag appears when any body has a saved parameter override.
 - **Game clock** — a top-center clock bar shows the current in-game date and four speed controls (1×, 10×, 100×, 1000× days/second). Click ⏸/▶ to pause or resume orbital motion.
 - **Return to orrery** — while viewing a body's globe, a floating **⊙ System** back-button returns to the orrery without discarding the generated planet.
 - **Exit system mode** — clicking **⊙ System** again while in the orrery returns to standalone planet-generation mode, restoring the previously generated globe.
@@ -128,11 +131,12 @@ Climate simulation (wind, ocean currents, precipitation, temperature, Köppen cl
 
 ### Visual Options
 
-- **Map Type** — segmented Terrain / Satellite / Climate / Heightmap tabs for quick switching between the four most common visualizations. Each tab shows a color legend:
+- **Map Type** — segmented Terrain / Satellite / Climate / Heightmap / Land HM tabs for quick switching between the five most common visualizations. Each tab shows a color legend:
   - **Terrain** — elevation color ramp from deep ocean through sea level to mountain peaks
   - **Satellite** — realistic biome colors based on Köppen climate classification and elevation (lush green rainforests, tan deserts, white ice caps, dark taiga, gray tundra), with ocean using the standard terrain palette. High elevations blend toward snow white based on climate-aware snow lines.
   - **Climate** — Köppen-Geiger classification with color swatches for all 35 climate types (30 standard Earth types plus 5 alien zones: Cryo-Desert, Deep Freeze, Primordial, Scorched, Hellscape)
-  - **Heightmap** — black-to-white gradient on an absolute scale (-5 km ocean floor to peak elevation), so the same physical height always maps to the same shade. The peak end of the scale adapts to the planet's gravity — roughly 6 km on an Earth-like world, higher on low-gravity planets.
+  - **Heightmap** — full ocean-floor-to-peak grayscale: black (−5 km deep trenches) → mid-gray (~45%, sea level) → white (peak elevation). Shows ocean floor relief (ridges, trenches, basins) alongside land terrain. Peak adapts to gravity — roughly 6 km on an Earth-like world, higher on low-gravity planets.
+  - **Land HM** — land-only heightmap: ocean is pure black, land scales from sea level (black) to peak (white). Useful as a direct game-engine heightmap input where ocean depth is irrelevant.
 - **View** dropdown — switch between Globe and Map (equirectangular projection)
 - **Center Longitude** slider (map mode only) — shifts the map projection's central meridian to any longitude from 180°W to 180°E, scrolling the equirectangular projection so the chosen longitude is centered. Exports are unaffected (always centered on 0°).
 - **Wireframe** — toggle switch to show Voronoi cell edges as a wireframe overlay
@@ -172,6 +176,8 @@ Click **Export Map** (below Visual Options) to open the export modal:
 | ⚄ Random System | System Panel | Generate a new procedural alien system |
 | Body list | System Panel | Click any rocky/icy body name to generate and view it |
 | ← Back to System | Floating button | Return to orrery from a body's globe view |
+| ↺ Defaults | Body-view banner | Reset the current body's planetary physics to its real-world defaults and clear any saved override |
+| Saved Systems | System Panel | Collapsible list of all visited systems — Load, Delete, or rename any entry inline |
 | ⏸ / ▶ | Clock bar (top) | Pause or resume orbital time |
 | 1× / 10× / 100× / 1000× | Clock bar (top) | Set orbital simulation speed (days/second) |
 
@@ -209,7 +215,7 @@ World Orogen is fully usable on phones and tablets:
 
 - **Bottom-sheet sidebar** — on screens 768px or narrower, the sidebar becomes a bottom sheet with a drag handle. Drag or tap the handle to expand/collapse. The globe stays visible above.
 - **Pinch-to-zoom** — two-finger pinch zooms the globe and map, using the same smooth lerp as desktop scroll-zoom.
-- **View switcher** — a dropdown in the top-right lets you switch between Terrain, Satellite, Climate, and Heightmap views without opening the bottom sheet.
+- **View switcher** — a dropdown in the top-right lets you switch between Terrain, Satellite, Climate, Heightmap, and Land HM views without opening the bottom sheet.
 - **Edit-mode toggle** — a floating pencil button (bottom-right) activates plate editing. Tap it to toggle edit mode (glows green when active), then tap any plate to reshape.
 - **Touch-friendly targets** — buttons, checkboxes, and sliders are enlarged for comfortable finger input.
 - **Performance** — detail warning thresholds are lowered on touch devices (orange at 200K, red at 500K). Export widths above 8192px are disabled on mobile.
@@ -265,6 +271,7 @@ js/
   main.js               Entry point — UI wiring, animation loop, solar system wiring
   state.js              Shared mutable application state
   solar-system.js       Solar system body definitions (OUR_SOLAR_SYSTEM) and procedural system generator (generateSystem)
+  system-storage.js     Solar system persistence — localStorage CRUD for system registry, body param overrides, and generation history
   game-clock.js         Compressed game-time clock — speed levels, Julian Day calendar, pause/resume
   orrery.js             2D top-down orrery — Kepler orbit solver, Three.js orbit rings and body meshes, HTML label overlay, raycasting
   system-planet-params.js  Adapter bridging solar system body params to planet-generator slider values

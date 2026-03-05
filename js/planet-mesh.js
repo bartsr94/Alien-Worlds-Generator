@@ -72,13 +72,21 @@ function smoothBiomeColors(mesh, koppenArr, r_elevation, biomeMode = 'earth') {
 }
 
 // Grayscale heightmap: black (lowest) → white (highest), in physical height space
-// Absolute-scale heightmap: fixed range -5 km (deep ocean) → max land peak.
-// Max land height scales with gravity (6 km at 1g, higher on low-gravity worlds).
+// Piecewise scale: ocean (-5→0 km) maps to 0→0.25; land (0→maxKm) maps to 0.25→1.0.
+// This gives land 75% of the brightness range so mountain relief is clearly visible.
 function heightmapColor(elevation) {
     const h = elevToHeightKm(elevation);
     const uplift = state.planetaryParams?.upliftMultiplier ?? 1;
     const maxKm = 6 * uplift; // equals 6/g
-    const t = Math.max(0, Math.min(1, (h + 5) / (maxKm + 5))); // -5 → 0, maxKm → 1
+    const SEA_GRAY = 0.25; // brightness assigned to sea level
+    let t;
+    if (h <= 0) {
+        // Ocean: -5 km → 0.0,  0 km → SEA_GRAY
+        t = Math.max(0, (h + 5) / 5) * SEA_GRAY;
+    } else {
+        // Land: 0 km → SEA_GRAY,  maxKm → 1.0
+        t = SEA_GRAY + Math.min(1, h / maxKm) * (1 - SEA_GRAY);
+    }
     return [t, t, t];
 }
 

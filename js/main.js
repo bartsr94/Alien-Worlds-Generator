@@ -493,9 +493,12 @@ function updateLegend(layer) {
         // Rain shadow diverging legend: leeward shadow ↔ neutral ↔ windward boost
         vizLegend.innerHTML = `<div class="legend-gradient" style="background:linear-gradient(to right,rgb(230,51,33) 0%,rgb(140,140,148) 50%,rgb(38,102,243) 100%)"></div>` +
             `<div class="legend-labels"><span>Rain Shadow</span><span>Neutral</span><span>Windward</span></div>`;
+    } else if (layer === 'heightmap') {
+        vizLegend.innerHTML = `<div class="legend-gradient" style="background:linear-gradient(to right,#000 0%,#404040 25%,#fff 100%)"></div>` +
+            `<div class="legend-labels"><span>Ocean Floor</span><span>Sea Level</span><span>Peak</span></div>`;
     } else if (layer === 'landheightmap') {
         vizLegend.innerHTML = `<div class="legend-gradient" style="background:linear-gradient(to right,#000 0%,#fff 100%)"></div>` +
-            `<div class="legend-labels"><span>Ocean / Sea Level</span><span>Peak</span></div>`;
+            `<div class="legend-labels"><span>Sea Level</span><span>Peak</span></div>`;
     } else if (layer === 'hydroState') {
         vizLegend.innerHTML =
             `<div class="legend-discrete">` +

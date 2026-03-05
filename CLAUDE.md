@@ -103,3 +103,21 @@ After any code change that adds, removes, or modifies slider controls, update th
 - The `RADICES` array (the count values in right-to-left order)
 - The `encodePlanetCode` and `decodePlanetCode` functions (packing/unpacking order)
 - The corresponding slider wiring in `js/main.js` (the `map` objects in the `generate-done` handler, `applyCode`, and hash-loading code)
+
+After any code change that adds or modifies solar system features, be aware of the **solar system persistence architecture**. All localStorage state for solar systems lives in `js/system-storage.js` under key `"wo-systems-v1"`.
+
+**Schema:** `{ activeSystemId: string|null, systems: [{ id, name, type:"sol"|"random", seed, savedAt, bodyOverrides:{bodyId:{gravity,atmosphere,hydrosphere,baseTemp,axialTilt}}, generatedBodyIds:[] }] }`
+
+**System ID convention:** `"sol"` for `OUR_SOLAR_SYSTEM`, `"random-{system.seed}"` for procedural systems. Always use `Object.is(system, OUR_SOLAR_SYSTEM)` identity check — never `!system.seed` (Sol has `seed: 42` which is truthy). Both the ID and the active system object are stored as `state.currentSystemId` and `state.currentSystem`.
+
+**In-session cache:** `state.systemCaches` is a plain object keyed by systemId; each value is a `Map<bodyId, {curData}>`. `state.generatedBodies` always points to `state.systemCaches[currentSystemId]`. Never create a new `Map()` unconditionally on `enterSystemMode()` — use `state.systemCaches[systemId] ??= new Map()`.
+
+**What is and is NOT persisted:** Only the five physics slider overrides (`gravity, atmosphere, hydrosphere, baseTemp, axialTilt`) are saved to localStorage. `curData` (terrain typed arrays) is intentionally not persisted — too large. Bodies re-generate on page reload but with their saved slider values applied.
+
+**Key call sites in `main.js`:**
+- `enterSystemMode()` — call `upsertSystem(record)` (preserve existing `bodyOverrides`/`generatedBodyIds`) then `setActiveSystemId(id)` then `renderSavedSystemsList()`
+- `enterBody()` — call `getBodyOverride(systemId, bodyId)` in both cache-hit and cache-miss paths and layer onto base params
+- `generate-done` body handler — call `markBodyGenerated()`, then `saveBodyOverride()`/`clearBodyOverride()` based on slider diff vs `body.params`, then `renderSavedSystemsList()`
+- Page-load restore — use `window._enterSystemMode` (exposed inside the `initSolarSystem()` IIFE) since page-load code runs outside that IIFE scope
+
+**`generate-done` guard:** Both top-level `generate-done` listeners (outside the solar system IIFE) must check `if (state.isBgGenerating || state.currentSystem) return` to avoid running standalone-planet code during solar body generation.
