@@ -303,14 +303,41 @@ export function computeFlowAccumulation(mesh, r_elevation) {
     const r_isOcean = new Uint8Array(N);
     for (let r = 0; r < N; r++) r_isOcean[r] = r_elevation[r] <= 0 ? 1 : 0;
 
-    // Collect and sort land cells by descending elevation so that when we
-    // process cell i its downstream target has not yet been processed —
-    // guaranteeing all upstream contributions arrive before we pass them on.
+    // ── BFS ocean-distance map ────────────────────────────────────────────
+    // Hop count to the nearest ocean cell. Ocean = 0, land cells get the
+    // BFS distance. Used as a secondary sort key and for flat-cell routing.
+    // This is O(N) and ensures rivers on flat coastal plains always drain
+    // toward the sea even after post-erosion operations (hypsometric
+    // correction, soil creep) have washed out the tiny EPS-scale gradient
+    // that priority-flood left behind.
+    const oceanDist = new Int32Array(N).fill(N); // N = unreachable sentinel
+    const bfsQueue = [];
+    for (let r = 0; r < N; r++) {
+        if (r_isOcean[r]) { oceanDist[r] = 0; bfsQueue.push(r); }
+    }
+    for (let qi = 0; qi < bfsQueue.length; qi++) {
+        const r = bfsQueue[qi];
+        const d = oceanDist[r] + 1;
+        for (let j = adjOffset[r]; j < adjOffset[r + 1]; j++) {
+            const nb = adjList[j];
+            if (oceanDist[nb] > d) { oceanDist[nb] = d; bfsQueue.push(nb); }
+        }
+    }
+
+    // ── Sort land cells: descending elevation, tie-break descending oceanDist ──
+    // Primary key (high→low elevation) guarantees upstream cells are
+    // processed before downstream ones.  For flat areas at the same
+    // elevation, processing farther-from-ocean cells first ensures
+    // accumulated flow propagates toward the coast correctly.
     const landCells = [];
     for (let r = 0; r < N; r++) if (!r_isOcean[r]) landCells.push(r);
-    landCells.sort((a, b) => r_elevation[b] - r_elevation[a]);
+    landCells.sort((a, b) => {
+        const de = r_elevation[b] - r_elevation[a];
+        if (de !== 0) return de;
+        return oceanDist[b] - oceanDist[a]; // tie-break: farthest from ocean first
+    });
 
-    // Build steepest-descent drain targets (−1 for pits / ocean drains)
+    // ── Steepest-descent drain targets ───────────────────────────────────
     const drainTarget = new Int32Array(N).fill(-1);
     for (let i = 0; i < landCells.length; i++) {
         const r = landCells[i];
@@ -321,10 +348,31 @@ export function computeFlowAccumulation(mesh, r_elevation) {
             const drop = h - r_elevation[nb];
             if (drop > bestDrop) { bestDrop = drop; bestNb = nb; }
         }
-        drainTarget[r] = bestNb; // −1 if isolated pit (rare after priority-flood)
+        drainTarget[r] = bestNb; // −1 if flat or isolated pit — resolved below
     }
 
-    // Accumulate flow downstream in high-to-low order
+    // ── Flat-cell routing ─────────────────────────────────────────────────
+    // Post-erosion operations (hypsometric correction, soil creep, ridge
+    // sharpening) run after priority-flood and can erase the tiny EPS-scale
+    // monotonic staircase that priority-flood created for coastal flats.
+    // For any cell with no strict downhill neighbor, route to the adjacent
+    // non-uphill cell that is closest to the ocean.
+    for (let i = 0; i < landCells.length; i++) {
+        const r = landCells[i];
+        if (drainTarget[r] !== -1) continue; // already has a downhill route
+        const h = r_elevation[r];
+        let bestNb = -1, bestDist = N;
+        for (let j = adjOffset[r]; j < adjOffset[r + 1]; j++) {
+            const nb = adjList[j];
+            if (r_elevation[nb] <= h && oceanDist[nb] < bestDist) {
+                bestDist = oceanDist[nb];
+                bestNb = nb;
+            }
+        }
+        drainTarget[r] = bestNb; // −1 only if all neighbors are strictly higher (true peak)
+    }
+
+    // ── Accumulate flow downstream in high-to-low order ──────────────────
     const r_flow = new Float32Array(N);
     for (let r = 0; r < N; r++) if (!r_isOcean[r]) r_flow[r] = 1;
 
@@ -337,5 +385,35 @@ export function computeFlowAccumulation(mesh, r_elevation) {
     // Ensure ocean cells stay at 0 (they may have received spillover above)
     for (let r = 0; r < N; r++) if (r_isOcean[r]) r_flow[r] = 0;
 
-    return r_flow;
+    // ── River-path mask ───────────────────────────────────────────────────
+    // Mark every cell on a continuous corridor from a high-flow source to the
+    // ocean. A cell qualifies as a river source if it is in the top 0.8% of
+    // land flow-accumulation values. From each such source, walk drainTarget
+    // downstream until the ocean, marking every cell along the way.
+    //
+    // This ensures that flat coastal plains — where steepest-descent routing
+    // fans out and each individual cell has lower per-cell flow than the
+    // inland trunk — are still coloured as part of the river corridor, because
+    // they lie on the proven drain path from a high-accumulation source.
+    const landVals = [];
+    for (let r = 0; r < N; r++) {
+        if (!r_isOcean[r] && r_flow[r] > 0) landVals.push(r_flow[r]);
+    }
+    landVals.sort((a, b) => a - b);
+    const riverThreshold = landVals.length > 0
+        ? landVals[Math.min(landVals.length - 1, Math.floor(landVals.length * 0.992))]
+        : Infinity;
+
+    const r_riverPath = new Uint8Array(N); // 1 = part of a river corridor
+    for (let r = 0; r < N; r++) {
+        if (r_isOcean[r] || r_flow[r] < riverThreshold) continue;
+        // Walk downstream from this source cell to the ocean, marking as we go
+        let cur = r;
+        while (cur >= 0 && !r_isOcean[cur] && !r_riverPath[cur]) {
+            r_riverPath[cur] = 1;
+            cur = drainTarget[cur];
+        }
+    }
+
+    return { r_flow, r_riverPath };
 }

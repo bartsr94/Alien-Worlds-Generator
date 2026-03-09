@@ -126,9 +126,9 @@ function runPostProcessing(mesh, r_xyz, r_elevation, params, neighborDist, seed,
 
     // Flow accumulation: steepest-descent drainage area per land cell.
     // Used for river-corridor rendering in terrain and satellite views.
-    const dl_flowAccum = computeFlowAccumulation(mesh, r_elevation);
+    const { r_flow: dl_flowAccum, r_riverPath: dl_riverPath } = computeFlowAccumulation(mesh, r_elevation);
 
-    return { dl_erosionDelta, dl_flowAccum, postTiming: timing };
+    return { dl_erosionDelta, dl_flowAccum, dl_riverPath, postTiming: timing };
 }
 
 /**
@@ -257,10 +257,11 @@ function handleGenerate(data) {
 
         progress(60, 'Eroding terrain\u2026');
         t0 = performance.now();
-        const { dl_erosionDelta, dl_flowAccum, postTiming } = runPostProcessing(mesh, r_xyz, r_elevation, { smoothing, glacialErosion, hydraulicErosion, thermalErosion, ridgeSharpening, terrainWarp }, neighborDist, seed, planetaryParams);
+        const { dl_erosionDelta, dl_flowAccum, dl_riverPath, postTiming } = runPostProcessing(mesh, r_xyz, r_elevation, { smoothing, glacialErosion, hydraulicErosion, thermalErosion, ridgeSharpening, terrainWarp }, neighborDist, seed, planetaryParams);
         timing.push({ stage: 'Terrain post-processing (total)', ms: performance.now() - t0 });
         debugLayers.erosionDelta = dl_erosionDelta;
         debugLayers.flowAccum = dl_flowAccum;
+        debugLayers.riverPath = dl_riverPath;
 
         let windResult = null, oceanResult = null, precipResult = null, tempResult = null;
 
@@ -395,7 +396,7 @@ function handleReapply(data) {
 
         progress(20, 'Eroding terrain\u2026');
         t0 = performance.now();
-        const { dl_erosionDelta, dl_flowAccum, postTiming } = runPostProcessing(W.mesh, W.r_xyz, r_elevation, data, W.neighborDist, W.seed, W.planetaryParams);
+        const { dl_erosionDelta, dl_flowAccum, dl_riverPath, postTiming } = runPostProcessing(W.mesh, W.r_xyz, r_elevation, data, W.neighborDist, W.seed, W.planetaryParams);
         const tPost = performance.now() - t0;
 
         // Update retained final elevation for deferred climate
@@ -425,6 +426,7 @@ function handleReapply(data) {
             t_elevation,
             erosionDelta: dl_erosionDelta,
             flowAccum: dl_flowAccum,
+            riverPath: dl_riverPath,
             r_wind_east_summer: windResult ? windResult.r_wind_east_summer : null,
             r_wind_north_summer: windResult ? windResult.r_wind_north_summer : null,
             r_wind_east_winter: windResult ? windResult.r_wind_east_winter : null,
@@ -470,7 +472,7 @@ function handleReapply(data) {
             _postTiming: postTiming
         };
 
-        self.postMessage(result, [r_elevation.buffer, t_elevation.buffer, dl_erosionDelta.buffer, dl_flowAccum.buffer]);
+        self.postMessage(result, [r_elevation.buffer, t_elevation.buffer, dl_erosionDelta.buffer, dl_flowAccum.buffer, dl_riverPath.buffer]);
 
     } catch (err) {
         self.postMessage({ type: 'error', message: err.message, stack: err.stack });
@@ -504,10 +506,11 @@ function handleEditRecompute(data) {
 
         progress(50, 'Eroding terrain\u2026');
         t0 = performance.now();
-        const { dl_erosionDelta, dl_flowAccum, postTiming } = runPostProcessing(mesh, r_xyz, r_elevation, data, W.neighborDist, W.seed, W.planetaryParams);
+        const { dl_erosionDelta, dl_flowAccum, dl_riverPath, postTiming } = runPostProcessing(mesh, r_xyz, r_elevation, data, W.neighborDist, W.seed, W.planetaryParams);
         const tPost = performance.now() - t0;
         debugLayers.erosionDelta = dl_erosionDelta;
         debugLayers.flowAccum = dl_flowAccum;
+        debugLayers.riverPath = dl_riverPath;
 
         // Update retained final elevation for deferred climate
         W.r_elevation_final = new Float32Array(r_elevation);

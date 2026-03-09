@@ -82,6 +82,13 @@ function resolveLayerState(debugLayer, debugLayers, mesh, r_elevation) {
     const flowAccumArr = riversPlausible && (isFlowAccum || !debugLayer || debugLayer === 'biome')
         ? ((debugLayers && debugLayers.flowAccum) || null)
         : null;
+    // riverPathArr: boolean mask (1 = on a river corridor reaching the ocean).
+    // Computed in the simulation alongside flowAccum; used instead of the raw
+    // percentile threshold so that flat coastal plains — where per-cell flow
+    // is diluted — are still coloured as part of the river.
+    const riverPathArr = riversPlausible && (isFlowAccum || !debugLayer || debugLayer === 'biome')
+        ? ((debugLayers && debugLayers.riverPath) || null)
+        : null;
     let flowAccumMax = 0, riverThreshold = Infinity;
     if (flowAccumArr) {
         const landVals = [];
@@ -109,7 +116,7 @@ function resolveLayerState(debugLayer, debugLayers, mesh, r_elevation) {
         isPrecip, precipArr, isRainShadow, rainShadowArr, isTemp, tempArr,
         isKoppen, isBiome, koppenArr, isCont, contArr,
         isHydroState, hydroStateArr, isHabitability, habitabilityArr,
-        isFlowAccum, flowAccumArr, flowAccumMax, riverThreshold,
+        isFlowAccum, flowAccumArr, flowAccumMax, riverThreshold, riverPathArr,
         dbgArr, dbgMin, dbgMax,
     };
 }
@@ -168,7 +175,7 @@ export function buildMapMesh() {
 
     const ls = resolveLayerState(debugLayer, debugLayers, mesh, r_elevation);
     const { isOceanCurrent, oceanWarmth, oceanSpeed,
-            isBiome, koppenArr, isFlowAccum, flowAccumArr, flowAccumMax, riverThreshold,
+            isBiome, koppenArr, isFlowAccum, flowAccumArr, flowAccumMax, riverThreshold, riverPathArr,
             dbgArr, dbgMin, dbgMax } = ls;
     if (isOceanCurrent && (!oceanWarmth || !oceanSpeed)) {
         console.warn(`[buildMapMesh] Ocean current layer "${debugLayer}" selected but data missing (warmth=${!!oceanWarmth}, speed=${!!oceanSpeed}). Hard-refresh (Ctrl+Shift+R) and generate a new planet.`);
@@ -202,9 +209,14 @@ export function buildMapMesh() {
         const br = mesh.s_begin_r(s);
 
         let [cr, cg, cb] = getRegionColor(br);
-        // River tinting in default terrain and biome views
-        if (flowAccumArr && !isFlowAccum && r_elevation[br] > 0 && flowAccumArr[br] >= riverThreshold) {
-            const t = Math.min(1, 0.5 + 0.5 * (flowAccumArr[br] - riverThreshold) / Math.max(1, flowAccumMax - riverThreshold));
+        // River tinting in default terrain and biome views.
+        // Use the precomputed path mask so flat coastal cells are included.
+        const onRiver = riverPathArr ? riverPathArr[br]
+            : (flowAccumArr && flowAccumArr[br] >= riverThreshold);
+        if (onRiver && !isFlowAccum && r_elevation[br] > 0) {
+            const t = riverPathArr
+                ? Math.min(1, 0.5 + 0.5 * (flowAccumArr[br] - riverThreshold) / Math.max(1, flowAccumMax - riverThreshold))
+                : 0.75;
             cr = cr * (1 - t * 0.6) + 0.2 * t * 0.6;
             cg = cg * (1 - t * 0.5) + 0.45 * t * 0.5;
             cb = cb * (1 - t * 0.4) + 0.8 * t * 0.4;
@@ -422,7 +434,7 @@ export function buildMesh() {
 
     const ls = resolveLayerState(debugLayer, debugLayers, mesh, r_elevation);
     const { isOceanCurrent, oceanWarmth, oceanSpeed,
-            isBiome, koppenArr, isFlowAccum, flowAccumArr, flowAccumMax, riverThreshold,
+            isBiome, koppenArr, isFlowAccum, flowAccumArr, flowAccumMax, riverThreshold, riverPathArr,
             dbgArr, dbgMin, dbgMax } = ls;
     if (isOceanCurrent && (!oceanWarmth || !oceanSpeed)) {
         console.warn(`[buildMesh] Ocean current layer "${debugLayer}" selected but data missing (warmth=${!!oceanWarmth}, speed=${!!oceanSpeed}). Hard-refresh (Ctrl+Shift+R) and generate a new planet.`);
@@ -484,9 +496,14 @@ export function buildMesh() {
         pos[off+6] = v2x; pos[off+7] = v2y; pos[off+8] = v2z;
 
         let [cr, cg, cb] = getRegionColor(br);
-        // River tinting in default terrain and biome views
-        if (flowAccumArr && !isFlowAccum && r_elevation[br] > 0 && flowAccumArr[br] >= riverThreshold) {
-            const t = Math.min(1, 0.5 + 0.5 * (flowAccumArr[br] - riverThreshold) / Math.max(1, flowAccumMax - riverThreshold));
+        // River tinting in default terrain and biome views.
+        // Use the precomputed path mask so flat coastal cells are included.
+        const onRiver = riverPathArr ? riverPathArr[br]
+            : (flowAccumArr && flowAccumArr[br] >= riverThreshold);
+        if (onRiver && !isFlowAccum && r_elevation[br] > 0) {
+            const t = riverPathArr
+                ? Math.min(1, 0.5 + 0.5 * (flowAccumArr[br] - riverThreshold) / Math.max(1, flowAccumMax - riverThreshold))
+                : 0.75;
             cr = cr * (1 - t * 0.6) + 0.2 * t * 0.6;
             cg = cg * (1 - t * 0.5) + 0.45 * t * 0.5;
             cb = cb * (1 - t * 0.4) + 0.8 * t * 0.4;
@@ -603,7 +620,7 @@ export function updateMeshColors() {
     const debugLayer = state.debugLayer || '';
 
     const ls = resolveLayerState(debugLayer, debugLayers, mesh, r_elevation);
-    const { isBiome, koppenArr, isFlowAccum, flowAccumArr, flowAccumMax, riverThreshold } = ls;
+    const { isBiome, koppenArr, isFlowAccum, flowAccumArr, flowAccumMax, riverThreshold, riverPathArr } = ls;
 
     // Precompute smoothed biome colors (one-pass neighbor blend)
     const biomeMode = state.planetaryParams?.biomeMode ?? 'earth';
@@ -619,9 +636,14 @@ export function updateMeshColors() {
     for (let s = 0; s < numSides; s++) {
         const br = mesh.s_begin_r(s);
         let [cr, cg, cb] = getRegionColor(br);
-        // River tinting in default terrain and biome views
-        if (flowAccumArr && !isFlowAccum && r_elevation[br] > 0 && flowAccumArr[br] >= riverThreshold) {
-            const t = Math.min(1, 0.5 + 0.5 * (flowAccumArr[br] - riverThreshold) / Math.max(1, flowAccumMax - riverThreshold));
+        // River tinting in default terrain and biome views.
+        // Use the precomputed path mask so flat coastal cells are included.
+        const onRiver = riverPathArr ? riverPathArr[br]
+            : (flowAccumArr && flowAccumArr[br] >= riverThreshold);
+        if (onRiver && !isFlowAccum && r_elevation[br] > 0) {
+            const t = riverPathArr
+                ? Math.min(1, 0.5 + 0.5 * (flowAccumArr[br] - riverThreshold) / Math.max(1, flowAccumMax - riverThreshold))
+                : 0.75;
             cr = cr * (1 - t * 0.6) + 0.2 * t * 0.6;
             cg = cg * (1 - t * 0.5) + 0.45 * t * 0.5;
             cb = cb * (1 - t * 0.4) + 0.8 * t * 0.4;
@@ -648,9 +670,14 @@ export function updateMeshColors() {
             const s = fts[f];
             const br = mesh.s_begin_r(s);
             let [cr, cg, cb] = getRegionColor(br);
-            // River tinting in default terrain and biome views
-            if (flowAccumArr && !isFlowAccum && r_elevation[br] > 0 && flowAccumArr[br] >= riverThreshold) {
-                const t = Math.min(1, 0.5 + 0.5 * (flowAccumArr[br] - riverThreshold) / Math.max(1, flowAccumMax - riverThreshold));
+            // River tinting in default terrain and biome views.
+            // Use the precomputed path mask so flat coastal cells are included.
+            const onRiver = riverPathArr ? riverPathArr[br]
+                : (flowAccumArr && flowAccumArr[br] >= riverThreshold);
+            if (onRiver && !isFlowAccum && r_elevation[br] > 0) {
+                const t = riverPathArr
+                    ? Math.min(1, 0.5 + 0.5 * (flowAccumArr[br] - riverThreshold) / Math.max(1, flowAccumMax - riverThreshold))
+                    : 0.75;
                 cr = cr * (1 - t * 0.6) + 0.2 * t * 0.6;
                 cg = cg * (1 - t * 0.5) + 0.45 * t * 0.5;
                 cb = cb * (1 - t * 0.4) + 0.8 * t * 0.4;

@@ -89,8 +89,10 @@ export function computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanRe
 
     // Dynamic normalization range — derived so that Earth defaults reproduce the
     // original fixed -45 to +45°C range exactly (28+17=45, 28-47-26=-45).
+    // dynT_MIN is floored at absolute zero (-273.15°C) so that tempScaleMin passed
+    // to koppen.js never produces physically impossible decoded temperatures.
     const dynT_MAX   = equatorialT + 17;
-    const dynT_MIN   = equatorialT - polarDrop - 26;
+    const dynT_MIN   = Math.max(-273.15, equatorialT - polarDrop - 26);
     const dynT_RANGE = Math.max(1, dynT_MAX - dynT_MIN);
 
     const result = {};
@@ -222,7 +224,10 @@ export function computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanRe
                 T = T_ann_adj + boostedDeviation * maritimeFactor;
             }
 
-            temp[r] = T;
+            // Physical lower bound: absolute zero (-273.15°C). No surface
+            // temperature can go below this regardless of atmospheric thinness
+            // or elevation.
+            temp[r] = Math.max(-273.15, T);
         }
 
         const tCompute = performance.now() - t0;

@@ -200,7 +200,9 @@ export function buildPlanetaryParams(sliders = {}) {
         equatorialTempC:       tempC + 13 + greenhouseBonus,
         // tempRangeC: pole-to-equator temperature drop in the power-law curve.
         // At Moderate (density=1.0) this equals Earth's hardcoded 47°C range.
-        tempRangeC:            47 * (atmosphereDensity > 0 ? 1 / atmosphereDensity : 1),
+        // sqrt(1/density) keeps Earth exact (sqrt(1)=1) while preventing
+        // runaway values on thin/trace atmospheres: Trace → ~210°C instead of 940°C.
+        tempRangeC:            47 * Math.sqrt(atmosphereDensity > 0 ? 1 / atmosphereDensity : 1),
         seasonalAmplitude:     tiltToSeasonalAmplitude(tilt),
 
         // ── Visual ───────────────────────────────────────────────────────────
