@@ -1,8 +1,8 @@
 // Wind simulation: pressure-driven seasonal wind with longitude-varying ITCZ.
 // Computes pressure fields and wind vectors for summer and winter seasons.
 
-import { elevToHeightKm } from '../render/color-map.js';
-import { smoothField, percentile } from './climate-util.js';
+import { elevToHeightKm } from '../core/elev-scale.js';
+import { smoothField, percentile, smoothstep } from './climate-util.js';
 
 const DEG = Math.PI / 180;
 const RAD = 180 / Math.PI;
@@ -68,14 +68,6 @@ function evaluateSpline(spline, lon) {
 
     const dx = t - xs[seg];
     return ys[seg] + b[seg] * dx + c[seg] * dx * dx + d[seg] * dx * dx * dx;
-}
-
-// ── Smoothstep utility ───────────────────────────────────────────────────────
-
-export function smoothstep(edge0, edge1, x) {
-    if (edge0 === edge1) return x >= edge1 ? 1 : 0;
-    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-    return t * t * (3 - 2 * t);
 }
 
 // ── ITCZ computation ─────────────────────────────────────────────────────────

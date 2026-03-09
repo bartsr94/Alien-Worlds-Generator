@@ -7,7 +7,7 @@ import { elevationToColor } from './render/color-map.js';
 import { computeClimateViaWorker } from './generate.js';
 
 // Climate layer keys — layers that require climate data
-const CLIMATE_LAYERS = new Set([
+export const CLIMATE_LAYERS = new Set([
     'pressureSummer', 'pressureWinter',
     'windSpeedSummer', 'windSpeedWinter',
     'oceanCurrentSummer', 'oceanCurrentWinter',

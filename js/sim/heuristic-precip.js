@@ -4,9 +4,8 @@
 // (distance from ITCZ), seasonal modifier, continental dryness, and
 // orographic rain shadow.
 
-import { smoothstep } from './wind.js';
-import { elevToHeightKm } from '../render/color-map.js';
-import { smoothField, makeItczLookup } from './climate-util.js';
+import { smoothstep, smoothField, makeItczLookup } from './climate-util.js';
+import { elevToHeightKm } from '../core/elev-scale.js';
 
 const DEG = Math.PI / 180;
 

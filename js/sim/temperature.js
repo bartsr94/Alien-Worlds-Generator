@@ -4,9 +4,8 @@
 // ocean current warmth, and precipitation/cloud cover moderation.
 // Returns normalized 0-1 values mapped to a fixed -45 to +45 C range.
 
-import { smoothstep } from './wind.js';
+import { smoothstep, smoothField, makeItczLookup } from './climate-util.js';
 import { elevToHeightKm } from '../render/color-map.js';
-import { smoothField, makeItczLookup } from './climate-util.js';
 
 const DEG = Math.PI / 180;
 

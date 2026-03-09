@@ -7,9 +7,9 @@ import { renderer, scene, camera, ctrl, waterMesh, atmosMesh, starsMesh,
          updateAtmosphereColor, updateWaterColor, updateHazeLayer,
          orreryCamera, orreryCtrl, tickOrreryZoom, updateOrreryCameraFrustum } from './render/scene.js';
 import { state } from './core/state.js';
-import { generate, reapplyViaWorker, computeClimateViaWorker } from './generate.js';
+import { generate, reapplyViaWorker, computePlanetaryDebugLayers } from './generate.js';
 import { encodePlanetCode, decodePlanetCode } from './world/planet-code.js';
-import { buildMesh, updateMeshColors, buildMapMesh, rebuildGrids, exportMap, exportMapBatch, buildWindArrows, buildOceanCurrentArrows, clearSelectionHighlight } from './render/planet-mesh.js';
+import { buildMesh, updateMeshColors, buildMapMesh, rebuildGrids, buildWindArrows, buildOceanCurrentArrows, clearSelectionHighlight } from './render/planet-mesh.js';
 import { setupEditMode, hideTilePanel } from './edit-mode.js';
 import { detailFromSlider, sliderFromDetail } from './core/detail-scale.js';
 import { setUpliftMult, setHasLiquidOcean,
@@ -18,20 +18,12 @@ import { buildPlanetaryParams, ATM_LABELS, HYDRO_LABELS } from './world/planetar
 import { OUR_SOLAR_SYSTEM, generateSystem } from './world/solar-system.js';
 import { loadRegistry } from './world/system-storage.js';
 import { initSolarSystem } from './solar-ui.js';
-import { switchVisualization, syncTabsToLayer, updateLegend, onProgress, showBuildOverlay, hideBuildOverlay, debugLayerEl } from './viz-controls.js';
+import { CLIMATE_LAYERS, switchVisualization, syncTabsToLayer, updateLegend, onProgress, showBuildOverlay, hideBuildOverlay, debugLayerEl } from './viz-controls.js';
+import { WORLD_PRESETS, applyPreset, updatePlanetWarnings } from './ui/world-preset.js';
+import { initExportModal } from './ui/export-modal.js';
+import { initTutorial, initSurveyTracker } from './ui/modals.js';
 
-// World Preset definitions — { gravity, atm, hydro, baseTemp, tilt }
-const WORLD_PRESETS = {
-    earth:    { gravity: 1.0, atm: 3, hydro: 3, baseTemp:   15, tilt: 23 },
-    arid:     { gravity: 1.0, atm: 2, hydro: 1, baseTemp:   40, tilt: 25 },
-    mars:     { gravity: 0.4, atm: 1, hydro: 0, baseTemp:  -60, tilt: 25 },
-    venus:    { gravity: 0.9, atm: 5, hydro: 0, baseTemp:  460, tilt:  3 },
-    ocean:    { gravity: 1.0, atm: 3, hydro: 5, baseTemp:   20, tilt: 20 },
-    highgrav: { gravity: 2.5, atm: 3, hydro: 3, baseTemp:   15, tilt: 23 },
-    iceball:  { gravity: 0.8, atm: 2, hydro: 2, baseTemp:  -80, tilt: 15 },
-    titan:    { gravity: 0.1, atm: 4, hydro: 2, baseTemp: -180, tilt: 27 },
-    deadrock: { gravity: 0.5, atm: 0, hydro: 0, baseTemp:    0, tilt: 10 },
-};
+state.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 
 // Slider value displays + stale tracking
 const sliderIds = ['sN','sP','sCn','sJ','sNs','sGravity','sAtm','sHydro','sBaseTemp','sTilt'];
@@ -205,71 +197,6 @@ function shouldSkipClimate() {
     return detailFromSlider(+document.getElementById('sN').value) > AUTO_CLIMATE_THRESHOLD;
 }
 
-/**
- * Apply a named world preset to the five Planetary Physics sliders.
- * 'random' picks alien-range values randomly.
- */
-function applyPreset(name) {
-    let p = WORLD_PRESETS[name];
-    if (!p) {
-        if (name === 'random') {
-            const gravList = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.2, 1.5, 1.8, 2.0, 2.5];
-            const tempList = [-150, -100, -80, -60, -40, -20, 0, 30, 60, 100, 150, 200, 300, 400, 460];
-            p = {
-                gravity:  gravList[Math.floor(Math.random() * gravList.length)],
-                atm:      Math.floor(Math.random() * 6),
-                hydro:    Math.floor(Math.random() * 5),
-                baseTemp: tempList[Math.floor(Math.random() * tempList.length)],
-                tilt:     Math.floor(Math.random() * 81),
-            };
-        } else {
-            return;
-        }
-    }
-    const map = { sGravity: p.gravity, sAtm: p.atm, sHydro: p.hydro, sBaseTemp: p.baseTemp, sTilt: p.tilt };
-    for (const [id, val] of Object.entries(map)) {
-        const el = document.getElementById(id);
-        if (!el) continue;
-        el.value = val;
-        el.dispatchEvent(new Event('input'));
-    }
-    // input events above reset the dropdown to 'custom'; restore the preset label (random stays 'custom')
-    const wp = document.getElementById('worldPreset');
-    if (wp && name !== 'random') wp.value = name;
-    state.currentPreset = (name !== 'random') ? name : 'custom';
-}
-
-/** Show constraint warnings for implausible planetary parameter combinations. */
-function updatePlanetWarnings() {
-    const el = document.getElementById('planetWarning');
-    if (!el) return;
-    const atm  = +(document.getElementById('sAtm')?.value      ?? 3);
-    const hydro = +(document.getElementById('sHydro')?.value   ?? 3);
-    const temp = +(document.getElementById('sBaseTemp')?.value ?? 15);
-    const grav = +(document.getElementById('sGravity')?.value  ?? 1.0);
-    const tilt = +(document.getElementById('sTilt')?.value     ?? 23);
-
-    // Priority: errors first, then warnings
-    if (atm === 0 && hydro >= 2) {
-        el.textContent = '\u26A0 No atmosphere — surface liquids would instantly vaporize. Hydrosphere produces no weather or oceans.';
-        el.className = 'planet-warning error';
-    } else if (atm >= 4 && grav <= 0.3) {
-        el.textContent = '\u26A0 A thick atmosphere on a very low-gravity world is unlikely to be retained — it would escape to space over geological time.';
-        el.className = 'planet-warning warn';
-    } else if (temp >= 150 && hydro >= 3 && atm <= 3) {
-        el.textContent = '\u26A0 At these temperatures, liquid water boils away under normal pressure. Only a crushing atmosphere could keep it liquid.';
-        el.className = 'planet-warning warn';
-    } else if (tilt >= 60) {
-        el.textContent = '\u2139 Extreme axial tilt causes severe seasons — polar regions alternate between months of constant sunlight and total darkness.';
-        el.className = 'planet-warning warn';
-    } else {
-        el.textContent = '';
-        el.className = 'planet-warning';
-    }
-}
-
-
-
 // Generate button
 const genBtn = document.getElementById('generate');
 genBtn.addEventListener('click', () => {
@@ -406,6 +333,16 @@ genBtn.addEventListener('generate-done', () => {
     syncTabsToLayer(state.debugLayer);
     if (debugLayerEl) debugLayerEl.value = state.debugLayer;
     updateLegend(state.debugLayer);
+
+    // Recompute planetary inspection layers (habitability, hydroState) now that
+    // state.planetaryParams is set correctly — the worker 'done' handler computed
+    // them earlier with null params (earth defaults). This ensures alien worlds
+    // (ice, hot, dry) show correct habitability scores.
+    if (state.climateComputed && state.curData?.debugLayers && state.curData.r_temperature_summer) {
+        const planetary = computePlanetaryDebugLayers(state.curData, state.planetaryParams);
+        state.curData.debugLayers.hydroState   = planetary.r_hydro_state;
+        state.curData.debugLayers.habitability = planetary.r_habitability;
+    }
 
     // Always re-render with the newly applied palette vars (setBaseTemp etc. changed
     // module state in color-map.js after buildMesh already ran with stale values).
@@ -632,77 +569,7 @@ if (debugLayerEl) {
 }
 
 // Export modal
-(function initExport() {
-    const overlay   = document.getElementById('exportOverlay');
-    const closeBtn  = document.getElementById('exportClose');
-    const cancelBtn = document.getElementById('exportCancel');
-    const goBtn     = document.getElementById('exportGo');
-    const widthEl   = document.getElementById('exportWidth');
-    const dimsEl    = document.getElementById('exportDims');
-    const typeEl    = document.getElementById('exportType');
-    const openBtn   = document.getElementById('exportBtn');
-
-    function updateDims() {
-        const w = +widthEl.value;
-        dimsEl.textContent = w + ' \u00D7 ' + (w / 2);
-    }
-
-    function openModal() {
-        overlay.classList.remove('hidden');
-        updateDims();
-        // Disable climate-dependent export types when climate isn't computed
-        for (const opt of typeEl.options) {
-            if (opt.value === 'biome' || opt.value === 'koppen') {
-                opt.disabled = !state.climateComputed;
-                if (opt.disabled && typeEl.value === opt.value) typeEl.value = 'color';
-            }
-        }
-    }
-    function closeModal() { overlay.classList.add('hidden'); }
-
-    openBtn.addEventListener('click', openModal);
-    closeBtn.addEventListener('click', closeModal);
-    cancelBtn.addEventListener('click', closeModal);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !overlay.classList.contains('hidden')) closeModal();
-    });
-    widthEl.addEventListener('change', updateDims);
-
-    goBtn.addEventListener('click', async () => {
-        const type = typeEl.value;
-        const w = +widthEl.value;
-        closeModal();
-        showBuildOverlay();
-        onProgress(0, 'Preparing export...');
-        await exportMap(type, w, onProgress);
-        hideBuildOverlay();
-    });
-
-    // Export All — downloads Satellite, Climate, Heightmap, and Land Mask
-    const exportAllBtn = document.getElementById('exportAllGo');
-    const EXPORT_ALL_TYPES = [
-        { type: 'biome',          label: 'Satellite' },
-        { type: 'koppen',         label: 'Climate' },
-        { type: 'landheightmap',  label: 'Heightmap' },
-        { type: 'landmask',       label: 'Land Mask' },
-    ];
-
-    exportAllBtn.addEventListener('click', async () => {
-        const w = +widthEl.value;
-        closeModal();
-        showBuildOverlay();
-
-        // Compute climate first if needed (Satellite & Climate require it)
-        if (!state.climateComputed) {
-            onProgress(0, 'Computing climate...');
-            await new Promise(resolve => computeClimateViaWorker(onProgress, resolve));
-        }
-
-        await exportMapBatch(EXPORT_ALL_TYPES, w, onProgress);
-        hideBuildOverlay();
-    });
-})();
+initExportModal();
 
 // Edit mode setup (pointer events, sub-mode buttons)
 setupEditMode();
@@ -984,138 +851,9 @@ window.addEventListener('resize', () => {
     renderer.setSize(innerWidth, innerHeight);
 });
 
-// Tutorial modal
-(function initTutorial() {
-    const overlay  = document.getElementById('tutorialOverlay');
-    const card     = document.getElementById('tutorialCard');
-    const closeBtn = document.getElementById('tutorialClose');
-    const backBtn  = document.getElementById('tutorialBack');
-    const nextBtn  = document.getElementById('tutorialNext');
-    const helpBtn  = document.getElementById('helpBtn');
-    const steps    = card.querySelectorAll('.tutorial-step');
-    const dots     = card.querySelectorAll('.dot');
-    const TOTAL    = steps.length;
-    const LS_KEY   = 'atlas-engine-tutorial-seen';
-    let current    = 0;
-
-    function showStep(i) {
-        current = i;
-        steps.forEach((s, idx) => s.classList.toggle('active', idx === i));
-        dots.forEach((d, idx) => d.classList.toggle('active', idx === i));
-        backBtn.disabled = i === 0;
-        nextBtn.textContent = i === TOTAL - 1 ? 'Get Started' : 'Next';
-    }
-
-    function openModal() {
-        current = 0;
-        showStep(0);
-        overlay.classList.remove('hidden');
-    }
-
-    function closeModal() {
-        overlay.classList.add('hidden');
-        localStorage.setItem(LS_KEY, '1');
-    }
-
-    nextBtn.addEventListener('click', () => {
-        if (current < TOTAL - 1) showStep(current + 1);
-        else closeModal();
-    });
-
-    backBtn.addEventListener('click', () => {
-        if (current > 0) showStep(current - 1);
-    });
-
-    closeBtn.addEventListener('click', closeModal);
-
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) closeModal();
-    });
-
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !overlay.classList.contains('hidden')) closeModal();
-    });
-
-    helpBtn.addEventListener('click', openModal);
-
-    // Update tutorial step 2 for touch devices
-    if (state.isTouchDevice) {
-        const step2 = card.querySelector('.tutorial-step[data-step="2"]');
-        if (step2) {
-            const p = step2.querySelector('p');
-            if (p) p.innerHTML = '<strong>Drag</strong> to rotate the globe. <strong>Pinch</strong> to zoom in and out. Tap the <strong>edit button</strong> (pencil icon) then <strong>tap</strong> any plate to reshape continents &mdash; ocean rises into land, land floods into ocean.';
-        }
-    }
-
-    // Auto-show on first visit — wait until the build overlay has faded out
-    overlay.classList.add('hidden');
-    if (!localStorage.getItem(LS_KEY)) {
-        genBtn.addEventListener('generate-done', () => {
-            if (buildOverlay) {
-                buildOverlay.addEventListener('transitionend', () => openModal(), { once: true });
-            } else {
-                openModal();
-            }
-        }, { once: true });
-    }
-})();
-
-// Power-user survey — triggers after 3+ distinct hours across 2+ distinct days
-(function initSurveyTracker() {
-    const LS = 'wo-usage';
-    const LS_DISMISSED = 'wo-survey-dismissed';
-
-    if (localStorage.getItem(LS_DISMISSED)) return;
-
-    // Simple hash so we don't store raw timestamps
-    function hash(str) {
-        let h = 5381;
-        for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
-        return h.toString(36);
-    }
-
-    let data;
-    try { data = JSON.parse(localStorage.getItem(LS)) || {}; } catch (_) { data = {}; }
-    const hours = data.h || 0;
-    const days  = data.d || 0;
-    const lastH = data.lh || '';
-    const lastD = data.ld || '';
-
-    const now = new Date();
-    const hourKey = hash(now.getFullYear() + '-' + now.getMonth() + '-' + now.getDate() + 'T' + now.getHours());
-    const dayKey  = hash(now.getFullYear() + '-' + now.getMonth() + '-' + now.getDate());
-
-    const newHours = hourKey !== lastH ? hours + 1 : hours;
-    const newDays  = dayKey  !== lastD ? days  + 1 : days;
-
-    localStorage.setItem(LS, JSON.stringify({ h: newHours, d: newDays, lh: hourKey, ld: dayKey }));
-
-    if (newHours >= 3 && newDays >= 2) {
-        const overlay    = document.getElementById('surveyOverlay');
-        const closeBtn   = document.getElementById('surveyClose');
-        const dismissBtn = document.getElementById('surveyDismiss');
-        const linkBtn    = document.getElementById('surveyLink');
-        if (!overlay) return;
-
-        function dismiss() {
-            overlay.classList.add('hidden');
-            localStorage.setItem(LS_DISMISSED, '1');
-        }
-
-        // Show after the first generation completes
-        genBtn.addEventListener('generate-done', () => {
-            setTimeout(() => overlay.classList.remove('hidden'), 1000);
-        }, { once: true });
-
-        closeBtn.addEventListener('click', dismiss);
-        dismissBtn.addEventListener('click', dismiss);
-        linkBtn.addEventListener('click', dismiss);
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) dismiss(); });
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && !overlay.classList.contains('hidden')) dismiss();
-        });
-    }
-})();
+// Tutorial modal and power-user survey
+initTutorial();
+initSurveyTracker();
 
 // Screenshot helper — call window.takePreview() from the browser console
 // Hides UI, renders at 1200×630 from the current camera angle, downloads preview.png

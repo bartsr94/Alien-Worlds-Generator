@@ -18,7 +18,7 @@ setDelaunator(Delaunator);
  * Compute per-region Planetary inspection layers (Hydrosphere State,
  * Habitability Index).  Requires climate data to be present in curData.
  */
-function computePlanetaryDebugLayers(curData, planetaryParams) {
+export function computePlanetaryDebugLayers(curData, planetaryParams) {
     const { mesh, r_elevation,
             r_temperature_summer,
             r_precip_summer, r_precip_winter } = curData;
@@ -110,6 +110,52 @@ function fail(err) {
 // Reconstruct SphereMesh from transferred data
 function reconstructMesh(triangles, halfedges, numRegions) {
     return new SphereMesh(triangles, halfedges, numRegions);
+}
+
+/** Assign all terrain + climate fields from the worker 'done' message to state.curData. */
+function assignCurData(msg, mesh) {
+    state.curData = {
+        mesh,
+        r_xyz: msg.r_xyz,
+        t_xyz: msg.t_xyz,
+        r_plate: msg.r_plate,
+        plateSeeds: new Set(msg.plateSeeds),
+        plateVec: msg.plateVec,
+        plateIsOcean: new Set(msg.plateIsOcean),
+        originalPlateIsOcean: new Set(msg.originalPlateIsOcean),
+        plateDensity: msg.plateDensity,
+        plateDensityLand: msg.plateDensityLand,
+        plateDensityOcean: msg.plateDensityOcean,
+        prePostElev: msg.prePostElev,
+        r_elevation: msg.r_elevation,
+        t_elevation: msg.t_elevation,
+        mountain_r: new Set(msg.mountain_r),
+        coastline_r: new Set(msg.coastline_r),
+        ocean_r: new Set(msg.ocean_r),
+        r_stress: msg.r_stress,
+        r_wind_east_summer: msg.r_wind_east_summer,
+        r_wind_north_summer: msg.r_wind_north_summer,
+        r_wind_east_winter: msg.r_wind_east_winter,
+        r_wind_north_winter: msg.r_wind_north_winter,
+        itczLons: msg.itczLons,
+        itczLatsSummer: msg.itczLatsSummer,
+        itczLatsWinter: msg.itczLatsWinter,
+        r_ocean_current_east_summer: msg.r_ocean_current_east_summer,
+        r_ocean_current_north_summer: msg.r_ocean_current_north_summer,
+        r_ocean_current_east_winter: msg.r_ocean_current_east_winter,
+        r_ocean_current_north_winter: msg.r_ocean_current_north_winter,
+        r_ocean_speed_summer: msg.r_ocean_speed_summer,
+        r_ocean_speed_winter: msg.r_ocean_speed_winter,
+        r_ocean_warmth_summer: msg.r_ocean_warmth_summer,
+        r_ocean_warmth_winter: msg.r_ocean_warmth_winter,
+        r_precip_summer: msg.r_precip_summer,
+        r_precip_winter: msg.r_precip_winter,
+        r_temperature_summer: msg.r_temperature_summer,
+        r_temperature_winter: msg.r_temperature_winter,
+        seed: msg.seed,
+        nMag: msg.nMag,
+        debugLayers: msg.debugLayers
+    };
 }
 
 // Build minimal wind-result-like object for computeOceanCurrents fallback.
@@ -205,6 +251,67 @@ function buildWindResultForOcean(mesh, r_xyz, r_elevation,
     };
 }
 
+/**
+ * Apply main-thread climate fallbacks shared by the 'reapplyDone' and 'editDone'
+ * message handlers.  Fills any ocean/precip/temperature arrays the worker omitted,
+ * and clears stale climate data when skipClimate was set.
+ */
+function applyClimateFallback(d, skipClimate) {
+    // Ocean currents fallback
+    if (!d.r_ocean_speed_summer && d.r_wind_east_summer) {
+        const wr = buildWindResultForOcean(d.mesh, d.r_xyz, d.r_elevation,
+            d.r_wind_east_summer, d.r_wind_north_summer,
+            d.r_wind_east_winter, d.r_wind_north_winter,
+            d.itczLons, d.itczLatsSummer, d.itczLatsWinter);
+        const oc = computeOceanCurrents(d.mesh, d.r_xyz, d.r_elevation, wr);
+        Object.keys(oc).filter(k => k.startsWith('r_ocean_')).forEach(k => d[k] = oc[k]);
+    }
+    // Precipitation / temperature fallback
+    if (!skipClimate && d.r_wind_east_summer) {
+        let wr = null;
+        if (!d.r_precip_summer || !d.r_temperature_summer) {
+            wr = buildWindResultForOcean(d.mesh, d.r_xyz, d.r_elevation,
+                d.r_wind_east_summer, d.r_wind_north_summer,
+                d.r_wind_east_winter, d.r_wind_north_winter,
+                d.itczLons, d.itczLatsSummer, d.itczLatsWinter);
+        }
+        if (!d.r_precip_summer && wr) {
+            const pr = computePrecipitation(d.mesh, d.r_xyz, d.r_elevation, wr, d);
+            d.r_precip_summer = pr.r_precip_summer;
+            d.r_precip_winter = pr.r_precip_winter;
+            if (d.debugLayers) {
+                d.debugLayers.precipSummer = pr.r_precip_summer;
+                d.debugLayers.precipWinter = pr.r_precip_winter;
+                d.debugLayers.rainShadowSummer = pr.r_rainshadow_summer;
+                d.debugLayers.rainShadowWinter = pr.r_rainshadow_winter;
+            }
+        }
+        if (!d.r_temperature_summer && wr) {
+            const tr = computeTemperature(d.mesh, d.r_xyz, d.r_elevation, wr, d, d);
+            d.r_temperature_summer = tr.r_temperature_summer;
+            d.r_temperature_winter = tr.r_temperature_winter;
+            if (d.debugLayers) {
+                d.debugLayers.tempSummer = tr.r_temperature_summer;
+                d.debugLayers.tempWinter = tr.r_temperature_winter;
+            }
+        }
+    }
+    // Clear stale climate data when climate was skipped
+    if (skipClimate) {
+        d.r_precip_summer = null;
+        d.r_precip_winter = null;
+        d.r_temperature_summer = null;
+        d.r_temperature_winter = null;
+        if (d.debugLayers) {
+            d.debugLayers.koppen = null;
+            d.debugLayers.tempSummer = null;
+            d.debugLayers.tempWinter = null;
+            d.debugLayers.precipSummer = null;
+            d.debugLayers.precipWinter = null;
+        }
+    }
+}
+
 if (worker) {
     worker.onmessage = (e) => {
         const msg = e.data;
@@ -227,48 +334,7 @@ if (worker) {
                 state.climateComputed = !msg.skipClimate;
 
                 const tStateStart = performance.now();
-                state.curData = {
-                    mesh,
-                    r_xyz: msg.r_xyz,
-                    t_xyz: msg.t_xyz,
-                    r_plate: msg.r_plate,
-                    plateSeeds: new Set(msg.plateSeeds),
-                    plateVec: msg.plateVec,
-                    plateIsOcean: new Set(msg.plateIsOcean),
-                    originalPlateIsOcean: new Set(msg.originalPlateIsOcean),
-                    plateDensity: msg.plateDensity,
-                    plateDensityLand: msg.plateDensityLand,
-                    plateDensityOcean: msg.plateDensityOcean,
-                    prePostElev: msg.prePostElev,
-                    r_elevation: msg.r_elevation,
-                    t_elevation: msg.t_elevation,
-                    mountain_r: new Set(msg.mountain_r),
-                    coastline_r: new Set(msg.coastline_r),
-                    ocean_r: new Set(msg.ocean_r),
-                    r_stress: msg.r_stress,
-                    r_wind_east_summer: msg.r_wind_east_summer,
-                    r_wind_north_summer: msg.r_wind_north_summer,
-                    r_wind_east_winter: msg.r_wind_east_winter,
-                    r_wind_north_winter: msg.r_wind_north_winter,
-                    itczLons: msg.itczLons,
-                    itczLatsSummer: msg.itczLatsSummer,
-                    itczLatsWinter: msg.itczLatsWinter,
-                    r_ocean_current_east_summer: msg.r_ocean_current_east_summer,
-                    r_ocean_current_north_summer: msg.r_ocean_current_north_summer,
-                    r_ocean_current_east_winter: msg.r_ocean_current_east_winter,
-                    r_ocean_current_north_winter: msg.r_ocean_current_north_winter,
-                    r_ocean_speed_summer: msg.r_ocean_speed_summer,
-                    r_ocean_speed_winter: msg.r_ocean_speed_winter,
-                    r_ocean_warmth_summer: msg.r_ocean_warmth_summer,
-                    r_ocean_warmth_winter: msg.r_ocean_warmth_winter,
-                    r_precip_summer: msg.r_precip_summer,
-                    r_precip_winter: msg.r_precip_winter,
-                    r_temperature_summer: msg.r_temperature_summer,
-                    r_temperature_winter: msg.r_temperature_winter,
-                    seed: msg.seed,
-                    nMag: msg.nMag,
-                    debugLayers: msg.debugLayers
-                };
+                assignCurData(msg, mesh);
                 const tState = performance.now() - tStateStart;
 
                 // Main-thread fallbacks — only run when climate was requested but partially missing
@@ -334,7 +400,13 @@ if (worker) {
                         d.debugLayers.koppen = classifyKoppen(mesh, d.r_elevation,
                             { r_temperature_summer: d.r_temperature_summer, r_temperature_winter: d.r_temperature_winter },
                             { r_precip_summer: d.r_precip_summer, r_precip_winter: d.r_precip_winter });
-                        // Planetary inspection layers (depend on climate)
+                    }
+
+                    // Planetary inspection layers — always compute when climate is available,
+                    // regardless of whether koppen came from the worker or main-thread fallback.
+                    if (state.curData.debugLayers &&
+                        state.curData.r_temperature_summer && state.curData.r_precip_summer) {
+                        const d = state.curData;
                         try {
                             const planetary = computePlanetaryDebugLayers(d, state.planetaryParams);
                             d.debugLayers.hydroState   = planetary.r_hydro_state;
@@ -448,15 +520,6 @@ if (worker) {
                     d.r_ocean_warmth_summer = msg.r_ocean_warmth_summer;
                     d.r_ocean_warmth_winter = msg.r_ocean_warmth_winter;
                 }
-                // Fallback: compute ocean currents on main thread if worker didn't
-                if (!d.r_ocean_speed_summer && d.r_wind_east_summer) {
-                    const wr = buildWindResultForOcean(d.mesh, d.r_xyz, d.r_elevation,
-                        d.r_wind_east_summer, d.r_wind_north_summer,
-                        d.r_wind_east_winter, d.r_wind_north_winter,
-                        d.itczLons, d.itczLatsSummer, d.itczLatsWinter);
-                    const oc = computeOceanCurrents(d.mesh, d.r_xyz, d.r_elevation, wr);
-                    Object.keys(oc).filter(k => k.startsWith('r_ocean_')).forEach(k => d[k] = oc[k]);
-                }
                 if (msg.r_precip_summer) {
                     d.r_precip_summer = msg.r_precip_summer;
                     d.r_precip_winter = msg.r_precip_winter;
@@ -468,52 +531,7 @@ if (worker) {
                 if (msg.windDebugLayers) {
                     Object.assign(d.debugLayers, msg.windDebugLayers);
                 }
-                // Fallback: compute precip/temp on main thread if climate was
-                // requested but data is missing (e.g. partial worker result)
-                if (!msg.skipClimate && d.r_wind_east_summer) {
-                    let wr = null;
-                    if (!d.r_precip_summer || !d.r_temperature_summer) {
-                        wr = buildWindResultForOcean(d.mesh, d.r_xyz, d.r_elevation,
-                            d.r_wind_east_summer, d.r_wind_north_summer,
-                            d.r_wind_east_winter, d.r_wind_north_winter,
-                            d.itczLons, d.itczLatsSummer, d.itczLatsWinter);
-                    }
-                    if (!d.r_precip_summer && wr) {
-                        const pr = computePrecipitation(d.mesh, d.r_xyz, d.r_elevation, wr, d);
-                        d.r_precip_summer = pr.r_precip_summer;
-                        d.r_precip_winter = pr.r_precip_winter;
-                        if (d.debugLayers) {
-                            d.debugLayers.precipSummer = pr.r_precip_summer;
-                            d.debugLayers.precipWinter = pr.r_precip_winter;
-                            d.debugLayers.rainShadowSummer = pr.r_rainshadow_summer;
-                            d.debugLayers.rainShadowWinter = pr.r_rainshadow_winter;
-                        }
-                    }
-                    if (!d.r_temperature_summer && wr) {
-                        const tr = computeTemperature(d.mesh, d.r_xyz, d.r_elevation, wr, d, d);
-                        d.r_temperature_summer = tr.r_temperature_summer;
-                        d.r_temperature_winter = tr.r_temperature_winter;
-                        if (d.debugLayers) {
-                            d.debugLayers.tempSummer = tr.r_temperature_summer;
-                            d.debugLayers.tempWinter = tr.r_temperature_winter;
-                        }
-                    }
-                }
-                // Clear stale climate data when climate was skipped so rendering
-                // doesn't show mismatched terrain/climate from a previous run
-                if (msg.skipClimate) {
-                    d.r_precip_summer = null;
-                    d.r_precip_winter = null;
-                    d.r_temperature_summer = null;
-                    d.r_temperature_winter = null;
-                    if (d.debugLayers) {
-                        d.debugLayers.koppen = null;
-                        d.debugLayers.tempSummer = null;
-                        d.debugLayers.tempWinter = null;
-                        d.debugLayers.precipSummer = null;
-                        d.debugLayers.precipWinter = null;
-                    }
-                }
+                applyClimateFallback(d, msg.skipClimate);
 
                 const tBuildStart = performance.now();
                 buildMesh();
@@ -571,15 +589,6 @@ if (worker) {
                     d.r_ocean_warmth_summer = msg.r_ocean_warmth_summer;
                     d.r_ocean_warmth_winter = msg.r_ocean_warmth_winter;
                 }
-                // Fallback: compute ocean currents on main thread if worker didn't
-                if (!d.r_ocean_speed_summer && d.r_wind_east_summer) {
-                    const wr = buildWindResultForOcean(d.mesh, d.r_xyz, d.r_elevation,
-                        d.r_wind_east_summer, d.r_wind_north_summer,
-                        d.r_wind_east_winter, d.r_wind_north_winter,
-                        d.itczLons, d.itczLatsSummer, d.itczLatsWinter);
-                    const oc = computeOceanCurrents(d.mesh, d.r_xyz, d.r_elevation, wr);
-                    Object.keys(oc).filter(k => k.startsWith('r_ocean_')).forEach(k => d[k] = oc[k]);
-                }
                 if (msg.r_precip_summer) {
                     d.r_precip_summer = msg.r_precip_summer;
                     d.r_precip_winter = msg.r_precip_winter;
@@ -589,51 +598,7 @@ if (worker) {
                     d.r_temperature_winter = msg.r_temperature_winter;
                 }
                 d.debugLayers = msg.debugLayers;
-                // Fallback: compute precip/temp on main thread if climate was
-                // requested but data is missing (e.g. partial worker result)
-                if (!msg.skipClimate && d.r_wind_east_summer) {
-                    let wr = null;
-                    if (!d.r_precip_summer || !d.r_temperature_summer) {
-                        wr = buildWindResultForOcean(d.mesh, d.r_xyz, d.r_elevation,
-                            d.r_wind_east_summer, d.r_wind_north_summer,
-                            d.r_wind_east_winter, d.r_wind_north_winter,
-                            d.itczLons, d.itczLatsSummer, d.itczLatsWinter);
-                    }
-                    if (!d.r_precip_summer && wr) {
-                        const pr = computePrecipitation(d.mesh, d.r_xyz, d.r_elevation, wr, d);
-                        d.r_precip_summer = pr.r_precip_summer;
-                        d.r_precip_winter = pr.r_precip_winter;
-                        if (d.debugLayers) {
-                            d.debugLayers.precipSummer = pr.r_precip_summer;
-                            d.debugLayers.precipWinter = pr.r_precip_winter;
-                            d.debugLayers.rainShadowSummer = pr.r_rainshadow_summer;
-                            d.debugLayers.rainShadowWinter = pr.r_rainshadow_winter;
-                        }
-                    }
-                    if (!d.r_temperature_summer && wr) {
-                        const tr = computeTemperature(d.mesh, d.r_xyz, d.r_elevation, wr, d, d);
-                        d.r_temperature_summer = tr.r_temperature_summer;
-                        d.r_temperature_winter = tr.r_temperature_winter;
-                        if (d.debugLayers) {
-                            d.debugLayers.tempSummer = tr.r_temperature_summer;
-                            d.debugLayers.tempWinter = tr.r_temperature_winter;
-                        }
-                    }
-                }
-                // Clear stale climate data when climate was skipped
-                if (msg.skipClimate) {
-                    d.r_precip_summer = null;
-                    d.r_precip_winter = null;
-                    d.r_temperature_summer = null;
-                    d.r_temperature_winter = null;
-                    if (d.debugLayers) {
-                        d.debugLayers.koppen = null;
-                        d.debugLayers.tempSummer = null;
-                        d.debugLayers.tempWinter = null;
-                        d.debugLayers.precipSummer = null;
-                        d.debugLayers.precipWinter = null;
-                    }
-                }
+                applyClimateFallback(d, msg.skipClimate);
 
                 const tColorsStart = performance.now();
                 computePlateColors(d.plateSeeds, d.plateIsOcean);
@@ -695,6 +660,15 @@ if (worker) {
                     // Merge climate debug layers
                     if (msg.climateDebugLayers && d.debugLayers) {
                         Object.assign(d.debugLayers, msg.climateDebugLayers);
+                        // Planetary layers (hydroState, habitability) depend on climate and
+                        // are not computed by the worker — compute them here on the main thread.
+                        try {
+                            const planetary = computePlanetaryDebugLayers(d, state.planetaryParams);
+                            d.debugLayers.hydroState   = planetary.r_hydro_state;
+                            d.debugLayers.habitability = planetary.r_habitability;
+                        } catch (e) {
+                            console.warn('[generate.js] Planetary debug layers failed (climateDone):', e);
+                        }
                     }
                 }
                 state.climateComputed = true;

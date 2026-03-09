@@ -38,7 +38,7 @@ The three guiding principles, in tie-breaking order:
 │
 └── js/
     ├── main.js             Entry point — UI wiring, event loop, generate-done handler
-    ├── generate.js         Worker dispatcher — posts jobs, routes results
+    ├── generate.js         Worker dispatcher — posts jobs, routes results; exports computePlanetaryDebugLayers
     ├── planet-worker.js    Web Worker — runs the full geology + climate pipeline
     ├── edit-mode.js        Ctrl-click plate toggle, hover card, tile detail panel
     ├── solar-ui.js         Solar system UI — orrery, body list, saved systems, clock
@@ -50,7 +50,8 @@ The three guiding principles, in tie-breaking order:
     │   ├── state.js        Shared mutable application state (single source of truth)
     │   ├── rng.js          Seeded PRNG (mulberry32)
     │   ├── simplex-noise.js 3D Simplex noise
-    │   └── detail-scale.js  Non-linear mapping from the Detail slider to numRegions
+    │   ├── detail-scale.js  Non-linear mapping from the Detail slider to numRegions
+    │   └── elev-scale.js   Elevation → km conversion + upliftMult state (shared by sim and render)
     │
     ├── world/              World data and configuration — no simulation deps
     │   ├── planetary-params.js     Slider values → physics parameter object
@@ -58,6 +59,11 @@ The three guiding principles, in tie-breaking order:
     │   ├── solar-system.js         Body definitions + procedural system generator
     │   ├── system-planet-params.js Body definition → slider values adapter
     │   └── system-storage.js       Solar system localStorage persistence
+    │
+    ├── ui/                 UI component modules extracted from main.js
+    │   ├── world-preset.js     WORLD_PRESETS data, applyPreset(), updatePlanetWarnings()
+    │   ├── export-modal.js     Export modal wiring (single + batch PNG download)
+    │   └── modals.js           Tutorial modal + power-user survey tracker
     │
     ├── sim/                Simulation pipeline — geology, climate, tectonics
     │   ├── sphere-mesh.js      Fibonacci sphere + Voronoi/Delaunay tessellation
@@ -68,7 +74,7 @@ The three guiding principles, in tie-breaking order:
     │   ├── terrain-post.js     Domain warping, bilateral smoothing, soil creep, hypsometric correction; re-exports erosion.js
     │   ├── erosion.js          Priority-flood pit carving + composite hydraulic/thermal/glacial erosion
     │   ├── impact-craters.js   Procedural crater generation for airless worlds
-    │   ├── climate-util.js     Shared climate helpers
+    │   ├── climate-util.js     Shared climate helpers: smoothstep, Laplacian smoothing, ITCZ lookup, percentile
     │   ├── wind.js             Seasonal wind simulation (both hemispheres, 2 seasons)
     │   ├── ocean.js            Ocean surface current gyre simulation
     │   ├── precipitation.js    Moisture advection precipitation model
@@ -180,7 +186,7 @@ Important fields:
 | `debugLayer` | string | Currently active visualization layer |
 | `selectedRegion` | int\|null | Clicked tile index, null = no selection |
 | `currentSystem` | Object\|null | Active solar system, null = standalone mode |
-| `isTouchDevice` | bool | Whether device is mobile (set once at startup) |
+| `isTouchDevice` | bool | Whether device is mobile (set by main.js at startup via DOM detection) |
 
 ### `js/render/color-map.js` — Planetary Rendering State
 
@@ -256,6 +262,8 @@ generate.js posts 'computeClimate' ► Runs deferred climate on existing terrain
 **Why retain `W`?** The mesh topology (cell adjacency, coordinates) is expensive to rebuild and doesn't change between `reapply`/`edit`/`climate` operations. Keeping it in the worker avoids retransmitting ~10+ MB of typed arrays on every operation.
 
 **Fallback:** If module workers aren't supported (older Safari), `workerSupported = false` and all pipeline functions run synchronously on the main thread via `generateFallback()`.
+
+**Planetary inspection layers:** `computePlanetaryDebugLayers(curData, planetaryParams)` (exported from `generate.js`) computes `debugLayers.hydroState` and `debugLayers.habitability`. It runs **twice** per generation: a first pass in the `done` handler (while `state.planetaryParams` is still null, using `??` Earth-defaults), then definitively in the `generate-done` handler in `main.js` after `state.planetaryParams` is populated from slider values. This two-pass approach ensures alien worlds get correct habitability scores.
 
 ---
 

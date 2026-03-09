@@ -1,4 +1,12 @@
-// Shared climate utilities: smoothing, ITCZ lookup, and percentile selection.
+// Shared climate utilities: smoothstep, smoothing, ITCZ lookup, and percentile selection.
+
+// ── Smoothstep utility ───────────────────────────────────────────────────────
+
+export function smoothstep(edge0, edge1, x) {
+    if (edge0 === edge1) return x >= edge1 ? 1 : 0;
+    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
+}
 
 // ── Laplacian smoothing ──────────────────────────────────────────────────────
 

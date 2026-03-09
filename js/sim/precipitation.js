@@ -2,9 +2,9 @@
 // orographic effects, ITCZ uplift, frontal convergence, and polar fronts.
 // Computes per-region precipitation for summer and winter seasons.
 
-import { smoothstep } from './wind.js';
+import { smoothstep } from './climate-util.js';
 import { computeGradients } from './wind.js';
-import { elevToHeightKm } from '../render/color-map.js';
+import { elevToHeightKm } from '../core/elev-scale.js';
 import { computeHeuristicPrecipitation, computeHeuristicWindField } from './heuristic-precip.js';
 import { smoothField, makeItczLookup, percentile } from './climate-util.js';
 

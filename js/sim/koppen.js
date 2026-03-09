@@ -56,6 +56,15 @@ export const KOPPEN_CLASSES = [
     { code: 'XV',     name: 'Hellscape',                          color: [0.46, 0.06, 0.04] },  // dark crimson supercritical world
 ];
 
+// ── Alien (X) zone thresholds — outside Earth's temperature envelope ──
+// Earth surface temps stay within roughly −45 to +45°C; these are well beyond.
+const XV_TANN_THRESHOLD  = 250;   // °C — supercritical / Venus-class
+const XP_TANN_THRESHOLD  =  70;   // °C — extreme heat, wet conditions
+const XP_PANN_PROXY      =   0.4; // sum of pSummer+pWinter (0–1 scale) for wet threshold
+const XS_TANN_THRESHOLD  =  70;   // °C — extreme heat, dry
+const XD_THOT_THRESHOLD  = -30;   // °C — cryogenic (warmest month still below)
+const XD_PANN_PROXY      =   0.08;// sum of pSummer+pWinter — dry cryogenic threshold
+
 // Lookup table: KOPPEN_CLASSES code → ID (built once at import time)
 const CODE_TO_ID = {};
 KOPPEN_CLASSES.forEach((c, i) => { CODE_TO_ID[c.code] = i; });
@@ -108,13 +117,13 @@ export function classifyKoppen(mesh, r_elevation, tempResult, precipResult) {
         // These gates fire before any Köppen band logic. Thresholds are in
         // physical °C and are intentionally set well beyond Earth's climate range
         // so terrestrial worlds are unaffected.
-        if (Tann  > 250) { r_koppen[r] = CODE_TO_ID['XV']; continue; }  // Hellscape: supercritical / Venus-class
-        if (Tann  >  70 && (pSummer[r] + pWinter[r]) > 0.4)
-                         { r_koppen[r] = CODE_TO_ID['XP']; continue; }  // Primordial: hot + wet (archean, steam-jungle)
-        if (Tann  >  70) { r_koppen[r] = CODE_TO_ID['XS']; continue; }  // Scorched: extreme heat, dry
-        if (Thot  < -30 && (pSummer[r] + pWinter[r]) < 0.08)
-                         { r_koppen[r] = CODE_TO_ID['XD']; continue; }  // Cryo-Desert: frozen AND dry
-        if (Thot  < -30) { r_koppen[r] = CODE_TO_ID['XF']; continue; }  // Deep Freeze: cryogenic
+        if (Tann  > XV_TANN_THRESHOLD) { r_koppen[r] = CODE_TO_ID['XV']; continue; }  // Hellscape
+        if (Tann  > XP_TANN_THRESHOLD && (pSummer[r] + pWinter[r]) > XP_PANN_PROXY)
+                                       { r_koppen[r] = CODE_TO_ID['XP']; continue; }  // Primordial
+        if (Tann  > XS_TANN_THRESHOLD) { r_koppen[r] = CODE_TO_ID['XS']; continue; }  // Scorched
+        if (Thot  < XD_THOT_THRESHOLD && (pSummer[r] + pWinter[r]) < XD_PANN_PROXY)
+                                       { r_koppen[r] = CODE_TO_ID['XD']; continue; }  // Cryo-Desert
+        if (Thot  < XD_THOT_THRESHOLD) { r_koppen[r] = CODE_TO_ID['XF']; continue; }  // Deep Freeze
 
         // "Shoulder-month" temperature: approximate the temp 2 months before
         // peak summer.  With only 2 seasons we interpolate 2/6 of the way from

@@ -131,6 +131,44 @@ function runPostProcessing(mesh, r_xyz, r_elevation, params, neighborDist, seed,
     return { dl_erosionDelta, dl_flowAccum, postTiming: timing };
 }
 
+/**
+ * Run the full climate pipeline: wind → ocean currents → precipitation → temperature → Köppen.
+ * Shared by handleGenerate, handleReapply, handleEditRecompute, and handleComputeClimate.
+ * @param {number[]} progressPcts  [p0,p1,p2,p3,p4] — progress % emitted before each stage
+ * @returns {{ windResult, oceanResult, precipResult, tempResult, koppenResult,
+ *             tWind, tOcean, tPrecip, tTemp, tKoppen }}
+ */
+function runClimatePipeline(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, noise, planetaryParams, progressPcts) {
+    const [p0, p1, p2, p3, p4] = progressPcts;
+
+    progress(p0, 'Simulating wind patterns\u2026');
+    const t0w = performance.now();
+    const windResult = computeWind(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, noise, planetaryParams.axialTilt, planetaryParams);
+    const tWind = performance.now() - t0w;
+
+    progress(p1, 'Computing ocean currents\u2026');
+    const t0o = performance.now();
+    const oceanResult = computeOceanCurrents(mesh, r_xyz, r_elevation, windResult, planetaryParams);
+    const tOcean = performance.now() - t0o;
+
+    progress(p2, 'Computing precipitation\u2026');
+    const t0p = performance.now();
+    const precipResult = computePrecipitation(mesh, r_xyz, r_elevation, windResult, oceanResult, planetaryParams);
+    const tPrecip = performance.now() - t0p;
+
+    progress(p3, 'Computing temperature\u2026');
+    const t0t = performance.now();
+    const tempResult = computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanResult, precipResult, planetaryParams);
+    const tTemp = performance.now() - t0t;
+
+    progress(p4, 'Classifying climates\u2026');
+    const t0k = performance.now();
+    const koppenResult = classifyKoppen(mesh, r_elevation, tempResult, precipResult);
+    const tKoppen = performance.now() - t0k;
+
+    return { windResult, oceanResult, precipResult, tempResult, koppenResult, tWind, tOcean, tPrecip, tTemp, tKoppen };
+}
+
 function handleGenerate(data) {
     const { N, P, jitter, nMag, numContinents, smoothing, hydraulicErosion, thermalErosion, ridgeSharpening, glacialErosion, terrainWarp, seed: overrideSeed, toggledIndices, skipClimate } = data;
     const spread = 5;
@@ -227,44 +265,30 @@ function handleGenerate(data) {
         let windResult = null, oceanResult = null, precipResult = null, tempResult = null;
 
         if (!skipClimate) {
-            progress(70, 'Simulating wind patterns\u2026');
-            t0 = performance.now();
-            windResult = computeWind(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, noise, planetaryParams.axialTilt, planetaryParams);
-            timing.push({ stage: 'Wind simulation', ms: performance.now() - t0 });
+            const cl = runClimatePipeline(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, noise, planetaryParams, [70, 78, 82, 86, 88]);
+            windResult = cl.windResult; oceanResult = cl.oceanResult;
+            precipResult = cl.precipResult; tempResult = cl.tempResult;
+            timing.push({ stage: 'Wind simulation', ms: cl.tWind });
             if (windResult._windTiming) timing.push(...windResult._windTiming);
+            timing.push({ stage: 'Ocean currents', ms: cl.tOcean });
+            if (oceanResult._oceanTiming) timing.push(...oceanResult._oceanTiming);
+            timing.push({ stage: 'Precipitation', ms: cl.tPrecip });
+            if (precipResult._precipTiming) timing.push(...precipResult._precipTiming);
+            timing.push({ stage: 'Temperature', ms: cl.tTemp });
+            if (tempResult._tempTiming) timing.push(...tempResult._tempTiming);
+            timing.push({ stage: 'Köppen classification', ms: cl.tKoppen });
             debugLayers.pressureSummer = windResult.r_pressure_summer;
             debugLayers.pressureWinter = windResult.r_pressure_winter;
             debugLayers.windSpeedSummer = windResult.r_wind_speed_summer;
             debugLayers.windSpeedWinter = windResult.r_wind_speed_winter;
             debugLayers.continentality = windResult.r_continentality;
-
-            progress(78, 'Computing ocean currents\u2026');
-            t0 = performance.now();
-            oceanResult = computeOceanCurrents(mesh, r_xyz, r_elevation, windResult, planetaryParams);
-            timing.push({ stage: 'Ocean currents', ms: performance.now() - t0 });
-            if (oceanResult._oceanTiming) timing.push(...oceanResult._oceanTiming);
-
-            progress(82, 'Computing precipitation\u2026');
-            t0 = performance.now();
-            precipResult = computePrecipitation(mesh, r_xyz, r_elevation, windResult, oceanResult, planetaryParams);
-            timing.push({ stage: 'Precipitation', ms: performance.now() - t0 });
-            if (precipResult._precipTiming) timing.push(...precipResult._precipTiming);
             debugLayers.precipSummer = precipResult.r_precip_summer;
             debugLayers.precipWinter = precipResult.r_precip_winter;
             debugLayers.rainShadowSummer = precipResult.r_rainshadow_summer;
             debugLayers.rainShadowWinter = precipResult.r_rainshadow_winter;
-
-            progress(86, 'Computing temperature\u2026');
-            t0 = performance.now();
-            tempResult = computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanResult, precipResult, planetaryParams);
-            timing.push({ stage: 'Temperature', ms: performance.now() - t0 });
-            if (tempResult._tempTiming) timing.push(...tempResult._tempTiming);
             debugLayers.tempSummer = tempResult.r_temperature_summer;
             debugLayers.tempWinter = tempResult.r_temperature_winter;
-
-            t0 = performance.now();
-            debugLayers.koppen = classifyKoppen(mesh, r_elevation, tempResult, precipResult);
-            timing.push({ stage: 'Köppen classification', ms: performance.now() - t0 });
+            debugLayers.koppen = cl.koppenResult;
         }
 
         progress(skipClimate ? 75 : 90, 'Computing triangle elevations\u2026');
@@ -377,29 +401,14 @@ function handleReapply(data) {
         // Update retained final elevation for deferred climate
         W.r_elevation_final = new Float32Array(r_elevation);
 
-        let windResult = null, oceanResult = null, precipResult = null, tempResult = null;
+        let windResult = null, oceanResult = null, precipResult = null, tempResult = null, koppenResult = null;
         let tWind = 0, tOcean = 0, tPrecip = 0, tTemp = 0;
 
         if (!skipClimate) {
-            progress(60, 'Simulating wind patterns\u2026');
-            t0 = performance.now();
-            windResult = computeWind(W.mesh, W.r_xyz, r_elevation, W.plateIsOcean, W.r_plate, W.noise, W.planetaryParams.axialTilt, W.planetaryParams);
-            tWind = performance.now() - t0;
-
-            progress(75, 'Computing ocean currents\u2026');
-            t0 = performance.now();
-            oceanResult = computeOceanCurrents(W.mesh, W.r_xyz, r_elevation, windResult, W.planetaryParams);
-            tOcean = performance.now() - t0;
-
-            progress(80, 'Computing precipitation\u2026');
-            t0 = performance.now();
-            precipResult = computePrecipitation(W.mesh, W.r_xyz, r_elevation, windResult, oceanResult, W.planetaryParams);
-            tPrecip = performance.now() - t0;
-
-            progress(85, 'Computing temperature\u2026');
-            t0 = performance.now();
-            tempResult = computeTemperature(W.mesh, W.r_xyz, r_elevation, windResult, oceanResult, precipResult, W.planetaryParams);
-            tTemp = performance.now() - t0;
+            const cl = runClimatePipeline(W.mesh, W.r_xyz, r_elevation, W.plateIsOcean, W.r_plate, W.noise, W.planetaryParams, [60, 75, 80, 85, 89]);
+            windResult = cl.windResult; oceanResult = cl.oceanResult;
+            precipResult = cl.precipResult; tempResult = cl.tempResult; koppenResult = cl.koppenResult;
+            tWind = cl.tWind; tOcean = cl.tOcean; tPrecip = cl.tPrecip; tTemp = cl.tTemp;
         }
 
         progress(skipClimate ? 70 : 90, 'Computing triangle elevations\u2026');
@@ -446,7 +455,7 @@ function handleReapply(data) {
                 rainShadowWinter: precipResult.r_rainshadow_winter,
                 tempSummer: tempResult.r_temperature_summer,
                 tempWinter: tempResult.r_temperature_winter,
-                koppen: classifyKoppen(W.mesh, r_elevation, tempResult, precipResult)
+                koppen: koppenResult
             } : null,
             _reapplyTiming: {
                 clone: tClone,
@@ -507,38 +516,22 @@ function handleEditRecompute(data) {
         let tWind = 0, tOcean = 0, tPrecip = 0, tTemp = 0;
 
         if (!skipClimate) {
-            progress(65, 'Simulating wind patterns\u2026');
-            t0 = performance.now();
-            windResult = computeWind(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, W.noise, W.planetaryParams.axialTilt, W.planetaryParams);
-            tWind = performance.now() - t0;
+            const cl = runClimatePipeline(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, noise, W.planetaryParams, [65, 78, 82, 86, 89]);
+            windResult = cl.windResult; oceanResult = cl.oceanResult;
+            precipResult = cl.precipResult; tempResult = cl.tempResult;
+            tWind = cl.tWind; tOcean = cl.tOcean; tPrecip = cl.tPrecip; tTemp = cl.tTemp;
             debugLayers.pressureSummer = windResult.r_pressure_summer;
             debugLayers.pressureWinter = windResult.r_pressure_winter;
             debugLayers.windSpeedSummer = windResult.r_wind_speed_summer;
             debugLayers.windSpeedWinter = windResult.r_wind_speed_winter;
             debugLayers.continentality = windResult.r_continentality;
-
-            progress(78, 'Computing ocean currents\u2026');
-            t0 = performance.now();
-            oceanResult = computeOceanCurrents(mesh, r_xyz, r_elevation, windResult, W.planetaryParams);
-            tOcean = performance.now() - t0;
-
-            progress(82, 'Computing precipitation\u2026');
-            t0 = performance.now();
-            precipResult = computePrecipitation(mesh, r_xyz, r_elevation, windResult, oceanResult, W.planetaryParams);
-            tPrecip = performance.now() - t0;
             debugLayers.precipSummer = precipResult.r_precip_summer;
             debugLayers.precipWinter = precipResult.r_precip_winter;
             debugLayers.rainShadowSummer = precipResult.r_rainshadow_summer;
             debugLayers.rainShadowWinter = precipResult.r_rainshadow_winter;
-
-            progress(86, 'Computing temperature\u2026');
-            t0 = performance.now();
-            tempResult = computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanResult, precipResult, W.planetaryParams);
-            tTemp = performance.now() - t0;
             debugLayers.tempSummer = tempResult.r_temperature_summer;
             debugLayers.tempWinter = tempResult.r_temperature_winter;
-
-            debugLayers.koppen = classifyKoppen(mesh, r_elevation, tempResult, precipResult);
+            debugLayers.koppen = cl.koppenResult;
         }
 
         progress(skipClimate ? 75 : 90, 'Computing triangle elevations\u2026');
@@ -618,30 +611,9 @@ function handleComputeClimate() {
         const tTotal0 = performance.now();
         const { mesh, r_xyz, r_elevation_final, plateIsOcean, r_plate, noise, planetaryParams } = W;
 
-        progress(0, 'Simulating wind patterns\u2026');
-        let t0 = performance.now();
-        const windResult = computeWind(mesh, r_xyz, r_elevation_final, plateIsOcean, r_plate, noise, planetaryParams.axialTilt, planetaryParams);
-        const tWind = performance.now() - t0;
-
-        progress(30, 'Computing ocean currents\u2026');
-        t0 = performance.now();
-        const oceanResult = computeOceanCurrents(mesh, r_xyz, r_elevation_final, windResult, planetaryParams);
-        const tOcean = performance.now() - t0;
-
-        progress(50, 'Computing precipitation\u2026');
-        t0 = performance.now();
-        const precipResult = computePrecipitation(mesh, r_xyz, r_elevation_final, windResult, oceanResult, planetaryParams);
-        const tPrecip = performance.now() - t0;
-
-        progress(70, 'Computing temperature\u2026');
-        t0 = performance.now();
-        const tempResult = computeTemperature(mesh, r_xyz, r_elevation_final, windResult, oceanResult, precipResult, planetaryParams);
-        const tTemp = performance.now() - t0;
-
-        progress(88, 'Classifying climates\u2026');
-        t0 = performance.now();
-        const koppen = classifyKoppen(mesh, r_elevation_final, tempResult, precipResult);
-        const tKoppen = performance.now() - t0;
+        const { windResult, oceanResult, precipResult, tempResult, koppenResult: koppen,
+                tWind, tOcean, tPrecip, tTemp, tKoppen } =
+            runClimatePipeline(mesh, r_xyz, r_elevation_final, plateIsOcean, r_plate, noise, planetaryParams, [0, 30, 50, 70, 88]);
 
         const tWorkerTotal = performance.now() - tTotal0;
 

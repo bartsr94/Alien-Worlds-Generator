@@ -2,8 +2,7 @@
 // Wind belts drive zonal currents; continental shelves deflect them into gyres.
 // Warmth is classified geographically: western coasts = warm, eastern coasts = cold.
 
-import { smoothstep } from './wind.js';
-import { makeItczLookup, percentile } from './climate-util.js';
+import { smoothstep, makeItczLookup, percentile } from './climate-util.js';
 
 const DEG = Math.PI / 180;
 

@@ -167,6 +167,7 @@ After any code change that modifies worker communication or adds a new worker co
 - **Retained state `W`**: The worker clones essential data (mesh topology, coordinates, plate assignments, pre-erosion elevation) into a module-level `W` object after `'generate'`. Subsequent `'reapply'`/`'editRecompute'`/`'computeClimate'` commands reuse `W` without retransmission. This means the worker must always receive updated values for anything that changed (e.g. `toggledIndices` for edits, `planetaryParams` for reapply).
 - **Zero-copy transfers**: Large typed arrays (`r_xyz`, `r_elevation`, etc.) are transferred to the main thread via `postMessage` transfer lists. The worker keeps its own clones in `W`.
 - **Main-thread climate fallback**: If the worker returns terrain without climate data (e.g. `skipClimate` was set), `generate.js` has `buildWindResultForOcean()` and inline calls to `computeOceanCurrents()`, `computePrecipitation()`, `computeTemperature()`, `classifyKoppen()` that run on the main thread. This path is also used for `'computeClimate'` when workers aren't supported.
+- **Planetary inspection layers**: `computePlanetaryDebugLayers(curData, planetaryParams)` (exported from `generate.js`) computes `debugLayers.hydroState` and `debugLayers.habitability`. It runs **twice** per generation: a first pass in the `done` handler while `state.planetaryParams` is still null (using `??` Earth-defaults), then definitively in the `generate-done` handler in `main.js` after `state.planetaryParams` is populated from slider values. If you add new parameters that affect habitability or hydro state, update both call sites and ensure the `generate-done` pass uses `state.planetaryParams`.
 - **Callback pattern**: `generate()` accepts `onProgress(pct, label)` and `onDone()` callbacks stored as module-level `_onProgress`/`_onDone`. These are overwritten each call (not queued).
 
 *→ See `docs/ARCHITECTURE.md` § Worker Architecture for a sequence diagram and retained-state rationale.*
@@ -202,6 +203,7 @@ js/
     rng.js          Seeded PRNG
     simplex-noise.js  3-D Simplex noise
     detail-scale.js   Non-linear detail slider mapping
+    elev-scale.js     Elevation → km conversion + upliftMult state (shared by sim + render)
 
   world/            World data and configuration — no simulation deps
     planetary-params.js     Physics parameter builder
@@ -209,6 +211,11 @@ js/
     solar-system.js         Body definitions + procedural system generator
     system-planet-params.js Body → slider adapter
     system-storage.js       Solar system localStorage persistence
+
+  ui/               UI component modules (extracted from main.js)
+    world-preset.js   WORLD_PRESETS data, applyPreset(), updatePlanetWarnings()
+    export-modal.js   Export modal wiring (single + batch PNG download)
+    modals.js         Tutorial modal + power-user survey tracker
 
   viz-controls.js  Layer switching, legend rendering, build overlay
 

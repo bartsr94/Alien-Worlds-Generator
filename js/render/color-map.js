@@ -1,10 +1,6 @@
 // Elevation → RGB colour mapping.
-
-// Uplift multiplier for the current planet (1.0 = Earth default = 6 km cap).
-// Higher values allow taller mountains on low-gravity worlds.
-// Call setUpliftMult() with params.upliftMultiplier after each generation.
-let _upliftMult = 1;
-export function setUpliftMult(m) { _upliftMult = m > 0 ? m : 1; }
+import { elevToHeightKm, setUpliftMult } from '../core/elev-scale.js';
+export { elevToHeightKm, setUpliftMult } from '../core/elev-scale.js';
 
 // Whether the current planet has a liquid ocean.
 // When false, elevationToColor uses a dry rocky basin ramp instead of ocean blue.
@@ -23,18 +19,6 @@ export function setAtmosphere(v) { _atmosphere = (typeof v === 'number' && v >= 
 // Hydrosphere level (0–5) for the current planet (default = Earth 3).
 let _hydrosphere = 3;
 export function setHydrosphere(v) { _hydrosphere = (typeof v === 'number' && v >= 0) ? v : 3; }
-
-// Convert raw mesh elevation (nonlinear, 0-~1 for land at 1g) to physical height
-// in kilometres.  Smooth power curve: ramps slowly through lowlands,
-// accelerates into highlands.  Scales with gravity — max is 6*upliftMult km.
-// Ocean (elev < 0) is mapped with a linear scale (~5 km at -0.5).
-export function elevToHeightKm(elev) {
-    if (elev <= 0) return elev * 10;  // ocean: -0.5 → -5 km
-    // Normalize by upliftMult so a 0.3g planet's peaks (~elev 3.3) map to ~20 km,
-    // not the 6 km cap that applies at Earth (1g, upliftMult=1).
-    const t = Math.min(elev / _upliftMult, 1);
-    return 6 * _upliftMult * t * t;
-}
 
 // Biome base colors indexed by Köppen class ID (satellite-view palette).
 // 0=Ocean delegated, 1-30 = land biomes.

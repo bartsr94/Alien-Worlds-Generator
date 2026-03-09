@@ -290,6 +290,11 @@ js/
     system-planet-params.js  Adapter bridging solar system body params to planet-generator slider values
     system-storage.js   Solar system persistence — localStorage CRUD for system registry, body param overrides, and generation history
 
+  ui/                   UI component modules (extracted from main.js)
+    world-preset.js     WORLD_PRESETS data, applyPreset(), updatePlanetWarnings()
+    export-modal.js     Export modal wiring (single + batch PNG download)
+    modals.js           Tutorial modal + power-user survey tracker
+
   viz-controls.js       Visualization layer switching, legend rendering, and build overlay
 
   sim/                  Simulation pipeline — geology, climate, tectonics
@@ -301,7 +306,7 @@ js/
     terrain-post.js     Domain warping, bilateral smoothing, soil creep, hypsometric correction, ridge sharpening; re-exports erosion.js
     erosion.js          Priority-flood pit carving and composite hydraulic/thermal/glacial erosion
     impact-craters.js   Procedural impact crater generation for airless/trace-atmosphere worlds (power-law distribution, bowl+rim+ejecta profiles)
-    climate-util.js     Shared climate utilities — smoothing, ITCZ lookup, percentile selection
+    climate-util.js     Shared climate utilities — smoothstep, smoothing, ITCZ lookup, percentile selection
     wind.js             Seasonal wind simulation — pressure fields, ITCZ tracking, Coriolis wind
     ocean.js            Ocean surface currents — rule-based wind-belt gyres, coast BFS, circumpolar detection
     precipitation.js    Precipitation simulation — moisture advection, ITCZ/frontal/orographic effects, blended with heuristic

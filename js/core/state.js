@@ -26,7 +26,7 @@ export const state = {
     mapCenterLon: 0,
     dragStart: null,
     debugLayer: '',
-    isTouchDevice: ('ontouchstart' in window) || (navigator.maxTouchPoints > 0),
+    isTouchDevice: false,  // set by main.js at startup
     editMode: false,
     oceanCurrentArrowGroup: null,
     climateComputed: false,
