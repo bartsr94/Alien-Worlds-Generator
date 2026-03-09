@@ -20,7 +20,7 @@ setDelaunator(Delaunator);
  */
 export function computePlanetaryDebugLayers(curData, planetaryParams) {
     const { mesh, r_elevation,
-            r_temperature_summer,
+            r_temperature_summer, r_temperature_winter,
             r_precip_summer, r_precip_winter } = curData;
     const pp = planetaryParams;
     const n  = mesh.numRegions;
@@ -76,7 +76,32 @@ export function computePlanetaryDebugLayers(curData, planetaryParams) {
         r_habitability[r] = tempScore * waterScore;
     }
 
-    return { r_hydro_state, r_habitability };
+    // --- Ice cap arrays ---
+    // r_permanentIce: cells where even summer temperature stays below −10 °C
+    //   → permanent ice caps and land glaciers; rendered as brilliant white.
+    // r_seasonalIce:  cells below 0 °C in winter but warmer in summer
+    //   → pack ice on ocean, snow cover on land; rendered as pale blue-grey.
+    // Earth invariance: with baseTemp ≈ 15 °C the coldest summer cell is
+    // around −12 °C only at the geographic poles, which already look white
+    // in the biome/terrain palettes — the override blends on top seamlessly.
+    const r_permanentIce = new Uint8Array(n);
+    const r_seasonalIce  = new Uint8Array(n);
+    for (let r = 0; r < n; r++) {
+        const sumNorm = r_temperature_summer ? Math.max(0, Math.min(1, r_temperature_summer[r])) : 0.5;
+        const sumC    = tMin + sumNorm * tRange;
+        const winNorm = r_temperature_winter  ? Math.max(0, Math.min(1, r_temperature_winter[r]))  : 0.5;
+        const winC    = tMin + winNorm * tRange;
+        if (sumC < -10) {
+            r_permanentIce[r] = 1;
+        } else if (winC < 0) {
+            // Seasonal ice: ocean pack ice only when there is liquid water;
+            // seasonal snow on any cold land cell regardless.
+            if (r_elevation[r] <= 0 && !hasLiquidOcean) continue;
+            r_seasonalIce[r] = 1;
+        }
+    }
+
+    return { r_hydro_state, r_habitability, r_permanentIce, r_seasonalIce };
 }
 
 // --- Worker setup ---
@@ -409,8 +434,10 @@ if (worker) {
                         const d = state.curData;
                         try {
                             const planetary = computePlanetaryDebugLayers(d, state.planetaryParams);
-                            d.debugLayers.hydroState   = planetary.r_hydro_state;
-                            d.debugLayers.habitability = planetary.r_habitability;
+                            d.debugLayers.hydroState    = planetary.r_hydro_state;
+                            d.debugLayers.habitability  = planetary.r_habitability;
+                            d.debugLayers.permanentIce  = planetary.r_permanentIce;
+                            d.debugLayers.seasonalIce   = planetary.r_seasonalIce;
                         } catch (e) {
                             console.warn('[generate.js] Planetary debug layers failed:', e);
                         }
@@ -665,8 +692,10 @@ if (worker) {
                         // are not computed by the worker — compute them here on the main thread.
                         try {
                             const planetary = computePlanetaryDebugLayers(d, state.planetaryParams);
-                            d.debugLayers.hydroState   = planetary.r_hydro_state;
-                            d.debugLayers.habitability = planetary.r_habitability;
+                            d.debugLayers.hydroState    = planetary.r_hydro_state;
+                            d.debugLayers.habitability  = planetary.r_habitability;
+                            d.debugLayers.permanentIce  = planetary.r_permanentIce;
+                            d.debugLayers.seasonalIce   = planetary.r_seasonalIce;
                         } catch (e) {
                             console.warn('[generate.js] Planetary debug layers failed (climateDone):', e);
                         }
@@ -834,11 +863,15 @@ function generateFallback(overrideSeed, toggledIndices, onProgress, skipClimate)
                 debugLayers.koppen = classifyKoppen(ctx.mesh, r_elevation, tempResult, precipResult);
                 // Planetary inspection layers
                 try {
-                    const curDataProxy = { mesh: ctx.mesh, r_elevation, r_temperature_summer: tempResult.r_temperature_summer,
+                    const curDataProxy = { mesh: ctx.mesh, r_elevation,
+                                          r_temperature_summer: tempResult.r_temperature_summer,
+                                          r_temperature_winter: tempResult.r_temperature_winter,
                                           r_precip_summer: precipResult.r_precip_summer, r_precip_winter: precipResult.r_precip_winter };
                     const planetary = computePlanetaryDebugLayers(curDataProxy, state.planetaryParams);
-                    debugLayers.hydroState   = planetary.r_hydro_state;
-                    debugLayers.habitability = planetary.r_habitability;
+                    debugLayers.hydroState    = planetary.r_hydro_state;
+                    debugLayers.habitability  = planetary.r_habitability;
+                    debugLayers.permanentIce  = planetary.r_permanentIce;
+                    debugLayers.seasonalIce   = planetary.r_seasonalIce;
                 } catch (e) {
                     console.warn('[generate.js] Planetary debug layers failed (sync):', e);
                 }

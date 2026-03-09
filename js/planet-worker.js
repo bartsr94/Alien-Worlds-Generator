@@ -7,7 +7,7 @@ import { setDelaunator, buildSphere, generateTriangleCenters, SphereMesh, comput
 import { generateCoarsePlates, projectCoarsePlates } from './sim/coarse-plates.js';
 import { smoothAndReconnectPlates } from './sim/plates.js';
 import { assignElevation } from './sim/elevation.js';
-import { warpTerrain, smoothElevation, erodeComposite, sharpenRidges, applySoilCreep, applyHypsometricCorrection, computeFlowAccumulation } from './sim/terrain-post.js';
+import { warpTerrain, smoothElevation, erodeComposite, sharpenRidges, applySoilCreep, applyHypsometricCorrection, calibrateSeaLevel, computeFlowAccumulation } from './sim/terrain-post.js';
 import { stampCraters } from './sim/impact-craters.js';
 import { computeWind } from './sim/wind.js';
 import { computeOceanCurrents } from './sim/ocean.js';
@@ -107,7 +107,7 @@ function runPostProcessing(mesh, r_xyz, r_elevation, params, neighborDist, seed,
 
     {
         const t0 = performance.now();
-        applyHypsometricCorrection(mesh, r_elevation, r_isOcean);
+        applyHypsometricCorrection(mesh, r_elevation, r_isOcean, planetaryParams?.hydrosphere ?? 3);
         timing.push({ stage: 'Hypsometric correction', ms: performance.now() - t0 });
     }
 
@@ -259,6 +259,7 @@ function handleGenerate(data) {
         t0 = performance.now();
         const { dl_erosionDelta, dl_flowAccum, dl_riverPath, postTiming } = runPostProcessing(mesh, r_xyz, r_elevation, { smoothing, glacialErosion, hydraulicErosion, thermalErosion, ridgeSharpening, terrainWarp }, neighborDist, seed, planetaryParams);
         timing.push({ stage: 'Terrain post-processing (total)', ms: performance.now() - t0 });
+        calibrateSeaLevel(r_elevation, planetaryParams.oceanFraction);
         debugLayers.erosionDelta = dl_erosionDelta;
         debugLayers.flowAccum = dl_flowAccum;
         debugLayers.riverPath = dl_riverPath;
@@ -398,6 +399,7 @@ function handleReapply(data) {
         t0 = performance.now();
         const { dl_erosionDelta, dl_flowAccum, dl_riverPath, postTiming } = runPostProcessing(W.mesh, W.r_xyz, r_elevation, data, W.neighborDist, W.seed, W.planetaryParams);
         const tPost = performance.now() - t0;
+        calibrateSeaLevel(r_elevation, W.planetaryParams.oceanFraction);
 
         // Update retained final elevation for deferred climate
         W.r_elevation_final = new Float32Array(r_elevation);
@@ -508,6 +510,7 @@ function handleEditRecompute(data) {
         t0 = performance.now();
         const { dl_erosionDelta, dl_flowAccum, dl_riverPath, postTiming } = runPostProcessing(mesh, r_xyz, r_elevation, data, W.neighborDist, W.seed, W.planetaryParams);
         const tPost = performance.now() - t0;
+        calibrateSeaLevel(r_elevation, W.planetaryParams.oceanFraction);
         debugLayers.erosionDelta = dl_erosionDelta;
         debugLayers.flowAccum = dl_flowAccum;
         debugLayers.riverPath = dl_riverPath;

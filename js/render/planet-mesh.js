@@ -130,8 +130,27 @@ function makeColorizer(ls, biomeSmoothed, r_elevation, r_plate, r_stress,
             isHydroState, hydroStateArr, isHabitability, habitabilityArr,
             isFlowAccum, flowAccumArr, flowAccumMax,
             dbgArr, dbgMin, dbgMax } = ls;
+    // Ice cap arrays — snapshot once per colorizer build so lookups are O(1).
+    // null when climate hasn't been computed yet (safe — guards below check for null).
+    const _permIce = state.curData?.debugLayers?.permanentIce ?? null;
+    const _seasIce = state.curData?.debugLayers?.seasonalIce  ?? null;
     return (br) => {
-        if (isBiome && biomeSmoothed)          return [biomeSmoothed[br*3], biomeSmoothed[br*3+1], biomeSmoothed[br*3+2]];
+        if (isBiome && biomeSmoothed) {
+            let cr = biomeSmoothed[br*3], cg = biomeSmoothed[br*3+1], cb = biomeSmoothed[br*3+2];
+            if (_permIce?.[br]) {
+                // Permanent ice: brilliant blue-white, slightly warmer over ocean
+                const isOcn = r_elevation[br] <= 0;
+                cr = cr * 0.08 + (isOcn ? 0.84 : 0.93) * 0.92;
+                cg = cg * 0.08 + 0.93 * 0.92;
+                cb = cb * 0.08 + (isOcn ? 0.98 : 0.96) * 0.92;
+            } else if (_seasIce?.[br]) {
+                // Seasonal ice: soft pale blue-grey
+                cr = cr * 0.35 + 0.76 * 0.65;
+                cg = cg * 0.35 + 0.83 * 0.65;
+                cb = cb * 0.35 + 0.91 * 0.65;
+            }
+            return [cr, cg, cb];
+        }
         if (isCont && contArr)                 return continentalityColor(contArr[br]);
         if (isKoppen && koppenArr)             return koppenColor(koppenArr[br]);
         if (isTemp && tempArr)                 return temperatureColor(tempArr[br]);
@@ -158,7 +177,19 @@ function makeColorizer(ls, biomeSmoothed, r_elevation, r_plate, r_stress,
             if (ocean_r.has(br))     return [0.1, 0.2, 0.7];
             return [0.15, 0.15, 0.18];
         }
-        return elevationToColor(r_elevation[br] - waterLevel);
+        // Default terrain path — apply ice overlays on top of elevation colour.
+        let [cr, cg, cb] = elevationToColor(r_elevation[br] - waterLevel);
+        if (_permIce?.[br]) {
+            const isOcn = r_elevation[br] <= 0;
+            cr = cr * 0.08 + (isOcn ? 0.84 : 0.93) * 0.92;
+            cg = cg * 0.08 + 0.93 * 0.92;
+            cb = cb * 0.08 + (isOcn ? 0.98 : 0.96) * 0.92;
+        } else if (_seasIce?.[br]) {
+            cr = cr * 0.35 + 0.76 * 0.65;
+            cg = cg * 0.35 + 0.83 * 0.65;
+            cb = cb * 0.35 + 0.91 * 0.65;
+        }
+        return [cr, cg, cb];
     };
 }
 

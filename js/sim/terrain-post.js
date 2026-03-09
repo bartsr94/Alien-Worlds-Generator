@@ -238,7 +238,7 @@ export function applySoilCreep(mesh, r_elevation, r_isOcean, iterations, strengt
  *
  * Scale-invariant: operates purely on elevation values, not cell counts.
  */
-export function applyHypsometricCorrection(mesh, r_elevation, r_isOcean) {
+export function applyHypsometricCorrection(mesh, r_elevation, r_isOcean, hydro = 3) {
     const N = mesh.numRegions;
     const BLEND = 0.15;
 
@@ -276,9 +276,11 @@ export function applyHypsometricCorrection(mesh, r_elevation, r_isOcean) {
     // producing a gentle peak near sea level with gradual taper to highlands.
     remapPopulation(land,  t => Math.pow(t, 0.80));
 
-    // Ocean: mild depth bias — t^1.20 CDF shifts the distribution slightly
-    // deeper, widening the separation between shelf and abyssal populations.
-    remapPopulation(ocean, t => Math.pow(t, 1.20));
+    // Ocean: depth bias scaled by hydrosphere level.
+    // hydro=3 (Earth default) → exponent 1.20 (unchanged).
+    // Higher levels (4=High, 5=Flooded) → deeper basins; lower levels → shallower.
+    const oceanExp = 1.20 + 0.15 * (hydro - 3);
+    remapPopulation(ocean, t => Math.pow(t, oceanExp));
 }
 
 /**
@@ -295,6 +297,31 @@ export function applyHypsometricCorrection(mesh, r_elevation, r_isOcean) {
  *
  * Scale-invariant: operates on elevation values and adjacency topology only.
  */
+
+/**
+ * Shift the elevation field so that exactly `targetFraction` of all cells
+ * have elevation ≤ 0 (i.e. are ocean).  The shift is computed by finding the
+ * element at rank floor(targetFraction × N) in the sorted elevation array and
+ * subtracting it from every cell, which places that element precisely at 0.
+ *
+ * This is applied AFTER hypsometric correction so that the shape of the
+ * elevation distribution is preserved — only the zero‑crossing moves.
+ *
+ * Earth invariance: hydro=3 → oceanFraction=0.70; the plate assignment
+ * already targets 70 % ocean cells, so the shift is typically < 1 e-3 and
+ * visually imperceptible.
+ */
+export function calibrateSeaLevel(r_elevation, targetFraction) {
+    const N = r_elevation.length;
+    if (targetFraction <= 0 || targetFraction >= 1) return;
+    // Sort a copy to find the required shift without mutating the order.
+    const sorted = new Float32Array(r_elevation).sort();
+    const idx = Math.min(N - 1, Math.floor(targetFraction * N));
+    const shift = -sorted[idx];
+    if (Math.abs(shift) < 1e-6) return;
+    for (let r = 0; r < N; r++) r_elevation[r] += shift;
+}
+
 export function computeFlowAccumulation(mesh, r_elevation) {
     const N = mesh.numRegions;
     const { adjOffset, adjList } = mesh;
