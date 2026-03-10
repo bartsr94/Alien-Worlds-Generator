@@ -14,7 +14,7 @@ import { state } from './core/state.js';
 import { generate, reapplyViaWorker, computePlanetaryDebugLayers } from './generate.js';
 import { encodePlanetCode, decodePlanetCode } from './world/planet-code.js';
 import { buildMesh, updateMeshColors, buildMapMesh, rebuildGrids, buildWindArrows, buildOceanCurrentArrows, clearSelectionHighlight, drawColonyMarkers, clearColonyMarkers, updateMapColonyMarkers } from './render/planet-mesh.js';
-import { setupEditMode, hideTilePanel, showTilePanelCentered } from './edit-mode.js';
+import { setupEditMode, hideTilePanel, showTilePanelCentered, enterColonyView, exitColonyView } from './edit-mode.js';
 import { detailFromSlider, sliderFromDetail } from './core/detail-scale.js';
 import { setUpliftMult, setHasLiquidOcean,
          setBaseTemp, setAtmosphere, setHydrosphere } from './render/color-map.js';
@@ -26,8 +26,8 @@ import { CLIMATE_LAYERS, switchVisualization, syncTabsToLayer, updateLegend, onP
 import { WORLD_PRESETS, applyPreset, updatePlanetWarnings } from './ui/world-preset.js';
 import { initExportModal } from './ui/export-modal.js';
 import { initTutorial, initSurveyTracker } from './ui/modals.js';
-import { getGameDays, tickClock } from './game-clock.js';
-import { colonyProductionRates } from './colony.js';
+import { getGameDays, tickClock, getGameDate, isPaused } from './game-clock.js';
+import { STARTING_POOL, colonyProductionRates, maintenanceCost, getTier as getColonyTier, getHousingCap, getStorageContribution } from './colony.js';
 
 state.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 
@@ -228,17 +228,24 @@ genBtn.addEventListener('generate-done', hideBuildOverlay);
 genBtn.addEventListener('generate-done', () => {
     // Close tile panel and clear selection on any user-triggered generation
     if (state.isBgGenerating) return;
+    exitColonyView();
     hideTilePanel();
     clearSelectionHighlight();
     // Clear colonies for the active body — region indices change with each full generation
     if (!state.currentSystem) {
         state.colonies = state.colonies.filter(c => c.bodyId !== 'standalone');
+        delete state.bodyPools['standalone'];
     } else {
         const bodyId = state.activeBodyId;
-        if (bodyId) state.colonies = state.colonies.filter(c => c.bodyId !== bodyId);
+        if (bodyId) {
+            state.colonies = state.colonies.filter(c => c.bodyId !== bodyId);
+            delete state.bodyPools[bodyId];
+        }
     }
+    state.lastEconomyTickDays = getGameDays();
     clearColonyMarkers();
     updateHUD();
+    updateClockBarVisibility();
 });
 genBtn.addEventListener('generate-done', () => {
     const infoEl = document.getElementById('info');
@@ -442,6 +449,14 @@ loadBtn.addEventListener('click', () => {
 seedInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') applyCode(seedInput.value);
 });
+
+// Escape key: exit colony view first, then fall through to other handlers
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.colonyViewRegion !== null) {
+        exitColonyView();
+        e.stopPropagation();
+    }
+}, true); // capture phase so it fires before Three.js controls
 
 // View-mode checkboxes
 document.getElementById('chkPlates').addEventListener('change', updateMeshColors);
@@ -819,51 +834,111 @@ function updateHUD() {
     if (!panel) return;
     const bodyId   = state.activeBodyId || 'standalone';
     const bodyCols = state.colonies.filter(c => c.bodyId === bodyId);
+    const pool     = state.bodyPools[bodyId];
 
     if (state.solarSystemMode || !bodyCols.length) {
         panel.classList.add('hidden');
+        updateClockBarVisibility();
         return;
     }
     panel.classList.remove('hidden');
 
-    // Totals
-    let food = 0, water = 0, metals = 0, fuel = 0;
-    for (const c of bodyCols) {
-        food   += c.stockpile.food;
-        water  += c.stockpile.water;
-        metals += c.stockpile.metals;
-        fuel   += c.stockpile.fuel;
-    }
     const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M'
                    : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K'
-                   : n.toLocaleString();
+                   : Math.round(n).toLocaleString();
+    const fmtNet = n => (n >= 0 ? '+' : '') + Math.round(n).toLocaleString();
 
+    const poolMax = pool ? calcBodyPoolMax(bodyId) : 0;
+    const capFmt  = poolMax >= 1e6 ? (poolMax / 1e6).toFixed(1) + 'M'
+                  : poolMax >= 1e3 ? (poolMax / 1e3).toFixed(1) + 'K'
+                  : Math.round(poolMax).toLocaleString();
+    const nearCap = pool && [
+        pool.food, pool.water, pool.metals, pool.fuel
+    ].some(v => v >= poolMax * 0.85);
+
+    // Pool totals
+    const poolHTML = pool
+        ? `<div class="sp-total-row">
+  <span class="sp-total-item">🌾 <span class="sp-total-val">${fmt(pool.food)}</span></span>
+  <span class="sp-total-item">💧 <span class="sp-total-val">${fmt(pool.water)}</span></span>
+  <span class="sp-total-item">⛏ <span class="sp-total-val">${fmt(pool.metals)}</span></span>
+  <span class="sp-total-item">⚡ <span class="sp-total-val">${fmt(pool.fuel)}</span></span>
+</div>
+<div class="sp-pool-cap${nearCap ? ' sp-pool-cap-warn' : ''}">Pool cap: ${capFmt}</div>`
+        : '';
+
+    // Aggregate net rates
+    const now = getGameDays();
+    let netFood = 0, netWater = 0, netMetals = 0, netFuel = 0;
+    for (const c of bodyCols) {
+        const rates = colonyProductionRates(c, _getCurDataFor(c));
+        const maint = maintenanceCost(c);
+        const inBootstrap = now < c.bootstrapEndDay;
+        const prodMult = inBootstrap ? 0.20 : 1.0;
+        netFood   += Math.round(rates.food   * prodMult) - maint.food;
+        netWater  += Math.round(rates.water  * prodMult) - maint.water;
+        netMetals += Math.round(rates.metals * prodMult) - maint.metals;
+        netFuel   += Math.round(rates.fuel   * prodMult) - maint.fuel;
+    }
+    const cls = v => v >= 0 ? 'sp-net-positive' : 'sp-net-negative';
+    const netHTML = `<div class="sp-net-row">
+  <span class="sp-net-item ${cls(netFood)}">🌾 ${fmtNet(netFood)}/tick</span>
+  <span class="sp-net-item ${cls(netWater)}">💧 ${fmtNet(netWater)}/tick</span>
+  <span class="sp-net-item ${cls(netMetals)}">⛏ ${fmtNet(netMetals)}/tick</span>
+  <span class="sp-net-item ${cls(netFuel)}">⚡ ${fmtNet(netFuel)}/tick</span>
+</div>`;
     // Per-colony rows
+    const TIER_LABELS = { outpost: 'Outpost', settlement: 'Settlement', colony: 'Colony', city: 'City', megacity: 'Megacity' };
     const colonyRows = bodyCols.map(c => {
-        const rates = colonyProductionRates(c, state.curData);
-        const { getTier: _gt } = window._colonyHelpers || {};
-        // derive tier label from population
-        const TIERS = [
-            { max: 99, name: 'Outpost' }, { max: 9999, name: 'Settlement' },
-            { max: 999999, name: 'Colony' }, { max: 99999999, name: 'City' },
-            { max: Infinity, name: 'Megacity' },
-        ];
-        const tier = TIERS.find(t => c.population <= t.max)?.name ?? 'Colony';
-        const pop  = c.population >= 1e6 ? (c.population / 1e6).toFixed(2) + 'M'
-                   : c.population >= 1e3 ? Math.round(c.population / 1e3) + 'K'
-                   : c.population.toLocaleString();
+        const rates = colonyProductionRates(c, _getCurDataFor(c));
+        const maint = maintenanceCost(c);
+        const tier  = getColonyTier(c);
+        const pop   = c.population >= 1e6 ? (c.population / 1e6).toFixed(2) + 'M'
+                    : c.population >= 1e3 ? Math.round(c.population / 1e3) + 'K'
+                    : c.population.toLocaleString();
+        const inBootstrap = now < c.bootstrapEndDay;
+        let statusHTML = '';
+        if (inBootstrap) {
+            const pct  = Math.min(100, Math.round((now - c.foundedAtDay) / Math.max(1, c.bootstrapEndDay - c.foundedAtDay) * 100));
+            const rem  = Math.max(0, Math.round(c.bootstrapEndDay - now));
+            const prodMult = 0.20;
+            statusHTML = `<div class="sp-bootstrap-row">
+  <div class="sp-bootstrap-bar-bg"><div class="sp-bootstrap-bar-fill" style="width:${pct}%"></div></div>
+  <span class="sp-bootstrap-pct">${pct}%</span>
+</div>
+<div class="sp-bootstrap-label">Establishing… ${rem} days remaining</div>
+<div class="sp-col-mini-table">
+  <span class="sp-mini-head"></span><span class="sp-mini-head">Maint</span><span class="sp-mini-head">Prod</span>
+  <span>🌾</span><span class="sp-net-negative">−${maint.food}</span><span class="sp-net-positive">+${Math.round(rates.food * prodMult)}</span>
+  <span>💧</span><span class="sp-net-negative">−${maint.water}</span><span class="sp-net-positive">+${Math.round(rates.water * prodMult)}</span>
+  <span>⚡</span><span class="sp-net-negative">−${maint.fuel}</span><span class="sp-net-positive">+${Math.round(rates.fuel * prodMult)}</span>
+</div>`;
+        } else {
+            const net = r => r - (maint[Object.keys(maint)[['food','water','metals','fuel'].indexOf(r)]] ?? 0);
+            const rows = [
+                ['🌾', rates.food,   maint.food,   rates.food   - maint.food],
+                ['💧', rates.water,  maint.water,  rates.water  - maint.water],
+                ['⛏', rates.metals, maint.metals, rates.metals - maint.metals],
+                ['⚡', rates.fuel,   maint.fuel,   rates.fuel   - maint.fuel],
+            ];
+            const rowHTML = rows.map(([icon, prod, m, netVal]) =>
+                `<span>${icon}</span><span class="sp-net-positive">+${prod}</span><span class="sp-net-negative">−${m}</span><span class="${cls(netVal)}">${fmtNet(netVal)}</span>`
+            ).join('');
+            statusHTML = `<div class="sp-col-mini-table sp-col-active-table">
+  <span class="sp-mini-head"></span><span class="sp-mini-head">Prod</span><span class="sp-mini-head">Maint</span><span class="sp-mini-head">Net</span>
+  ${rowHTML}
+</div>`;
+        }
+        const starvWarn = c.starvationTicks > 0
+            ? `<div class="tp-starvation-warn">⚠ Starving (${c.starvationTicks}/3 ticks)</div>`
+            : '';
         return `<div class="sp-colony" data-region="${c.region}">
-  <div>
+  <div class="sp-col-info">
     <div class="sp-col-name">${c.name.replace(/</g, '&lt;')}</div>
-    <div class="sp-col-tier">${tier}</div>
-    <div class="sp-col-rates">
-      <span class="sp-rate">🌾<span>${fmt(rates.food)}</span></span>
-      <span class="sp-rate">💧<span>${fmt(rates.water)}</span></span>
-      <span class="sp-rate">⛏<span>${fmt(rates.metals)}</span></span>
-      <span class="sp-rate">⚡<span>${fmt(rates.fuel)}</span></span>
-    </div>
+    <div class="sp-col-tier">${TIER_LABELS[tier.name] ?? tier.name} · Pop ${pop}</div>
+    ${starvWarn}
+    ${statusHTML}
   </div>
-  <div class="sp-col-pop">${pop}</div>
 </div>`;
     }).join('');
 
@@ -871,54 +946,159 @@ function updateHUD() {
 <div class="sp-header">
   <span>Settlements &mdash; ${bodyCols.length}</span>
 </div>
-<div class="sp-total-row">
-  <span class="sp-total-item">🌾 <span class="sp-total-val">${fmt(food)}</span></span>
-  <span class="sp-total-item">💧 <span class="sp-total-val">${fmt(water)}</span></span>
-  <span class="sp-total-item">⛏ <span class="sp-total-val">${fmt(metals)}</span></span>
-  <span class="sp-total-item">⚡ <span class="sp-total-val">${fmt(fuel)}</span></span>
-</div>
+${poolHTML}
+${netHTML}
 <div class="sp-list">${colonyRows}</div>`;
 
     // Wire click-to-focus: clicking a colony row flies the camera to that tile
-    // and opens its tile panel.
     panel.querySelectorAll('.sp-colony').forEach(row => {
         row.style.cursor = 'pointer';
         row.addEventListener('click', () => {
             const region = parseInt(row.dataset.region, 10);
             if (isNaN(region) || !state.curData) return;
-            // Compute world-space direction of the region, accounting for planet rotation.
             const d = state.curData;
             const lx = d.r_xyz[region * 3], ly = d.r_xyz[region * 3 + 1], lz = d.r_xyz[region * 3 + 2];
             const ry = state.planetMesh?.rotation.y ?? 0;
-            const c = Math.cos(ry), s = Math.sin(ry);
-            const wx = lx * c + lz * s, wy = ly, wz = -lx * s + lz * c;
+            const cv = Math.cos(ry), s = Math.sin(ry);
+            const wx = lx * cv + lz * s, wy = ly, wz = -lx * s + lz * cv;
             flyToSurfacePoint(wx, wy, wz, 2.2);
-            // Small delay so the camera is already moving before the panel opens.
-            setTimeout(() => showTilePanelCentered(region), 80);
+            setTimeout(() => enterColonyView(region), 80);
         });
     });
+
+    updateClockBarVisibility();
 }
-window._refreshHUD = updateHUD;
+
+// ── HUD update decoupling ────────────────────────────────────────────────────
+// tickEconomy() only mutates state; this RAF-throttled path handles all DOM work.
+let _hudDirty = false;
+let _lastHudDraw = 0;
+function markHudDirty() { _hudDirty = true; }
+function maybeDrawHud(now) {
+    if (!_hudDirty) return;
+    if (now - _lastHudDraw < 100) return; // cap at 10fps
+    _lastHudDraw = now;
+    _hudDirty = false;
+    updateHUD();
+    // Refresh colony view panel + strip if active
+    window._refreshColonyPanel?.();
+    // Refresh open tile panel's colony section if one is pinned (no colony view)
+    if (state.colonyViewRegion === null && state.selectedRegion !== null) {
+        const tpColSec = document.querySelector('#tilePanel .tp-colony-sec');
+        if (tpColSec) {
+            const { buildColonySectionHTML: _bcsh } = window._editModeHelpers || {};
+            if (_bcsh) tpColSec.innerHTML = '<div class="tp-sectitle">COLONY</div>' + _bcsh(state.selectedRegion);
+        }
+    }
+}
+
+window._refreshHUD = markHudDirty;
+
+/** Show/hide the #systemBar clock bar based on whether colonies exist for this body. */
+function updateClockBarVisibility() {
+    const bar = document.getElementById('systemBar');
+    if (!bar) return;
+    const bodyId    = state.activeBodyId || 'standalone';
+    const hasColonies = state.colonies.some(c => c.bodyId === bodyId);
+    const show = hasColonies || state.solarSystemMode;
+    bar.classList.toggle('hidden', !show);
+    if (show) {
+        document.getElementById('btnPause')
+            ?.classList.toggle('paused-state', isPaused());
+    }
+}
+
+/** Maximum resource pool size for a body — base 500 plus Storage building contributions. */
+window._calcBodyPoolMax = function(bodyId) { return calcBodyPoolMax(bodyId); };
+function calcBodyPoolMax(bodyId) {
+    const BASE = 500;
+    return BASE + state.colonies
+        .filter(c => c.bodyId === bodyId)
+        .reduce((sum, c) => sum + getStorageContribution(c.buildings), 0);
+}
+
+/** Return the curData object for a colony (standalone or solar-body cache). */
+function _getCurDataFor(colony) {
+    if (state.currentSystem && state.generatedBodies) {
+        return state.generatedBodies.get(colony.bodyId)?.curData ?? null;
+    }
+    return state.curData;
+}
 
 function tickEconomy(gameDays) {
-    if (!state.colonies.length) return;
+    const bodyId = state.activeBodyId || 'standalone';
+    const bodyCols = state.colonies.filter(c => c.bodyId === bodyId);
+    if (!bodyCols.length) return;
     if (gameDays - state.lastEconomyTickDays < 30) return;
     state.lastEconomyTickDays = gameDays;
-    for (const colony of state.colonies) {
-        let cd = null;
-        if (state.currentSystem && state.generatedBodies) {
-            cd = state.generatedBodies.get(colony.bodyId)?.curData ?? null;
-        } else {
-            cd = state.curData;
-        }
+
+    const pool = state.bodyPools[bodyId];
+    if (!pool) return; // no pool yet — colonies haven't been founded via proper path
+
+    const toAbandon = [];
+
+    for (const colony of bodyCols) {
+        const cd = _getCurDataFor(colony);
         const rates = colonyProductionRates(colony, cd);
-        colony.stockpile.food   += rates.food;
-        colony.stockpile.water  += rates.water;
-        colony.stockpile.metals += rates.metals;
-        colony.stockpile.fuel   += rates.fuel;
-        colony.population = Math.round(colony.population * 1.005 + 5);
+        const maint = maintenanceCost(colony);
+        const inBootstrap = gameDays < colony.bootstrapEndDay;
+
+        // 1. Deduct maintenance from pool
+        const hadFood = pool.food >= maint.food;
+        pool.food   = Math.max(0, pool.food   - maint.food);
+        pool.water  = Math.max(0, pool.water  - maint.water);
+        pool.fuel   = Math.max(0, pool.fuel   - maint.fuel);
+        pool.metals = Math.max(0, pool.metals - maint.metals);
+        if (hadFood) {
+            colony.starvationTicks = 0;
+        } else {
+            colony.starvationTicks++;
+        }
+
+        // 2. Add production (full rate if active, 20% if bootstrapping)
+        const prodMult = inBootstrap ? 0.20 : 1.0;
+        pool.food   += Math.round(rates.food   * prodMult);
+        pool.water  += Math.round(rates.water  * prodMult);
+        pool.metals += Math.round(rates.metals * prodMult);
+        pool.fuel   += Math.round(rates.fuel   * prodMult);
+
+        // 3. Population growth (capped by housing)
+        const rawGrowth = inBootstrap
+            ? Math.round(colony.population * 1.001)
+            : Math.round(colony.population * 1.005 + 5);
+        colony.population = Math.min(rawGrowth, getHousingCap(colony.buildings));
+
+        // 4. Queue starvation collapse (don't mutate array mid-loop)
+        if (colony.starvationTicks >= 3) {
+            colony.population = Math.floor(colony.population * 0.75);
+            if (colony.population < 1) toAbandon.push(colony);
+        }
     }
-    updateHUD();
+
+    // Apply pool cap (base 500 + storage buildings)
+    const poolMax = calcBodyPoolMax(bodyId);
+    pool.food   = Math.min(pool.food,   poolMax);
+    pool.water  = Math.min(pool.water,  poolMax);
+    pool.metals = Math.min(pool.metals, poolMax);
+    pool.fuel   = Math.min(pool.fuel,   poolMax);
+
+    // Process abandonments after loop
+    if (toAbandon.length > 0) {
+        for (const abandoned of toAbandon) {
+            state.colonies = state.colonies.filter(c => c.id !== abandoned.id);
+        }
+        const names = toAbandon.map(c => c.name).join(', ');
+        // Brief toast notification
+        const notice = document.createElement('div');
+        notice.className = 'sp-notice';
+        notice.textContent = `${names} ${toAbandon.length === 1 ? 'has' : 'have'} been abandoned.`;
+        document.body.appendChild(notice);
+        setTimeout(() => notice.remove(), 4000);
+        drawColonyMarkers(state.colonies, bodyId);
+        updateMapColonyMarkers(state.colonies, bodyId, state.mapCenterLon || 0);
+    }
+
+    markHudDirty();
 }
 
 // Animation loop
@@ -952,19 +1132,24 @@ function animate() {
         orreryCtrl.update();
         if (window._solarSystemTickFrame) window._solarSystemTickFrame(realDtSec);
         tickEconomy(getGameDays());
+        maybeDrawHud(now);
         renderer.render(scene, orreryCamera);
     } else if (state.mapMode) {
         colonyGlobeGroup.visible = false;
         colonyMapGroup.visible   = true;
         tickClock(realDtSec);
+        const _gdEl2 = document.getElementById('gameDate'); if (_gdEl2) _gdEl2.textContent = getGameDate();
         tickEconomy(getGameDays());
+        maybeDrawHud(now);
         tickMapZoom(); mapCtrl.update();
         renderer.render(scene, mapCamera);
     } else {
         colonyGlobeGroup.visible = true;
         colonyMapGroup.visible   = false;
         tickClock(realDtSec);
+        const _gdEl = document.getElementById('gameDate'); if (_gdEl) _gdEl.textContent = getGameDate();
         tickEconomy(getGameDays());
+        maybeDrawHud(now);
         const _inBodyTransition = tickBodyTransition(realDtSec);
         const _inFlyTo = !_inBodyTransition && tickFlyTo(realDtSec);
         if (!_inBodyTransition && !_inFlyTo) { tickZoom(); ctrl.update(); }
@@ -1008,7 +1193,7 @@ window.takePreview = function(width = 1200, height = 630) {
 
     // Hide all UI elements
     const hiddenEls = [];
-    for (const sel of ['#ui', '#topInfo', '#info', '#hoverInfo', '#helpBtn',
+    for (const sel of ['#ui', '#info', '#hoverInfo', '#helpBtn',
                         '#editToggle', '#refreshFab', '#mobileViewSwitch',
                         '#buildOverlay', '#tutorialOverlay', '#exportOverlay', '#surveyOverlay']) {
         const el = document.querySelector(sel);
@@ -1079,7 +1264,8 @@ if (hashParams) {
             window._enterSystemMode(generateSystem(savedEntry.seed));
         }, 0);
     } else {
-        generate(undefined, [], onProgress, shouldSkipClimate());
+        // No saved state — boot into Sol system solar view
+        setTimeout(() => window._enterSystemMode(OUR_SOLAR_SYSTEM), 0);
     }
 }
 animate();

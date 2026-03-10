@@ -345,6 +345,17 @@ export function buildMapMesh() {
     scene.add(state.mapMesh);
 
     buildMapGrid();
+
+    // Sync colony map markers to the new center lon.
+    // This must run after buildMapGrid() so the grid is ready, but the key thing is
+    // that any time the map is (re)built the circles are repositioned to match.
+    if (state.colonies?.length) {
+        updateMapColonyMarkers(
+            state.colonies,
+            state.activeBodyId || 'standalone',
+            state.mapCenterLon || 0
+        );
+    }
 }
 
 // Build lat/lon grid overlay for map view.

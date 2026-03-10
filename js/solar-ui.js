@@ -26,7 +26,7 @@ import {
 import { initOrrery, tickOrrery, enterOrrery, exitOrrery, getBodyAtMouse } from './orrery.js';
 import {
     tickClock, getGameDate, isPaused, togglePause,
-    setSpeedIndex, getSpeedIndex, resetClock,
+    setSpeedIndex, getSpeedIndex, resetClock, getGameDays,
 } from './game-clock.js';
 
 export function initSolarSystem({ onProgress, shouldSkipClimate, switchPanel, showBuildOverlay }) {
@@ -369,6 +369,7 @@ export function initSolarSystem({ onProgress, shouldSkipClimate, switchPanel, sh
         _bgBodyId             = null;
         _systemSeed           = system.seed || Math.floor(Math.random() * 0xFFFFFF);
         resetClock();
+        state.lastEconomyTickDays = getGameDays(); // prevent tick debt / freeze after clock reset
 
         // ── Persist to localStorage ───────────────────────────────────────────
         const existing = loadRegistry().systems.find(s => s.id === systemId);

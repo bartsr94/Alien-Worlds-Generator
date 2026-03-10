@@ -334,6 +334,9 @@
         </details>
         </div><!-- /panelWorld -->
 
+        <!-- PANEL: Colony management — replaces panelWorld when a settlement is active -->
+        <div id="panelColony" class="panel"></div>
+
         <!-- PANEL: Visual (mobile — #vizWidget gets moved here by JS on touch devices) -->
         <div id="panelVisual" class="panel"></div>
 
@@ -538,7 +541,6 @@
         </div>
     </div>
 
-    <div id="topInfo">Drag to rotate &middot; Scroll to zoom &middot; Ctrl-click to reshape continents</div>
     <button id="editToggle" class="edit-toggle" title="Toggle plate edit mode">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M14.5 2.5l3 3L6 17H3v-3L14.5 2.5z"/>
@@ -593,5 +595,29 @@
     </script>
 
     <script type="module" src="js/main.js"></script>
+
+    <!-- Colony resource strip — shown at page bottom while colony view is active -->
+    <div id="colonyBottomStrip" class="hidden">
+        <div class="cbs-col" id="cbs-food">
+            <div class="cbs-label">&#x1F96A; FOOD</div>
+            <div class="cbs-bar-bg"><div class="cbs-bar-fill" id="cbs-bar-food"></div></div>
+            <div class="cbs-bottom"><span class="cbs-val" id="cbs-val-food"></span><span class="cbs-net" id="cbs-net-food"></span></div>
+        </div>
+        <div class="cbs-col" id="cbs-water">
+            <div class="cbs-label">&#x1F4A7; WATER</div>
+            <div class="cbs-bar-bg"><div class="cbs-bar-fill" id="cbs-bar-water"></div></div>
+            <div class="cbs-bottom"><span class="cbs-val" id="cbs-val-water"></span><span class="cbs-net" id="cbs-net-water"></span></div>
+        </div>
+        <div class="cbs-col" id="cbs-metals">
+            <div class="cbs-label">&#x26CF;&#xFE0F; METALS</div>
+            <div class="cbs-bar-bg"><div class="cbs-bar-fill" id="cbs-bar-metals"></div></div>
+            <div class="cbs-bottom"><span class="cbs-val" id="cbs-val-metals"></span><span class="cbs-net" id="cbs-net-metals"></span></div>
+        </div>
+        <div class="cbs-col" id="cbs-fuel">
+            <div class="cbs-label">&#x26A1; FUEL</div>
+            <div class="cbs-bar-bg"><div class="cbs-bar-fill" id="cbs-bar-fuel"></div></div>
+            <div class="cbs-bottom"><span class="cbs-val" id="cbs-val-fuel"></span><span class="cbs-net" id="cbs-net-fuel"></span></div>
+        </div>
+    </div>
 </body>
 </html>

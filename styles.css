@@ -468,14 +468,6 @@ button#generate.generating {
 .planet-warning:not(:empty) { max-height: 120px; padding: 6px 8px; }
 .planet-warning.warn  { background: rgba(232,160,32,0.12); border: 1px solid rgba(232,160,32,0.35); color: #e8a030; }
 .planet-warning.error { background: rgba(208,64,48,0.12); border: 1px solid rgba(208,64,48,0.35); color: #d04030; }
-#topInfo {
-    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
-    font-size: 13px; color: #889;
-    background: rgba(8,8,28,0.85); backdrop-filter: blur(8px);
-    padding: 6px 14px; border-radius: 8px;
-    border: 1px solid rgba(255,255,255,0.08);
-    white-space: nowrap; pointer-events: none;
-}
 #info {
     position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
     font-size: 13px; color: #667; transition: color 0.4s ease;
@@ -598,6 +590,136 @@ button#generate.generating {
                    letter-spacing: 0.08em; margin-bottom: 6px; }
 .tp-colony-rates { display: flex; gap: 8px; flex-wrap: wrap; font-size: 11px; color: #99a; padding-top: 4px; }
 .tp-rate-item    { display: flex; align-items: center; gap: 3px; }
+.tp-rate-item.tp-pos { color: #6c6; }
+.tp-rate-item.tp-neg { color: #c66; }
+.tp-pos { color: #6c6; }
+.tp-neg { color: #c66; }
+
+/* Founding cost rows */
+.tp-cost-row     { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-size: 12px; }
+.tp-cost-label   { width: 56px; color: #aaa; }
+.tp-cost-amount  { width: 36px; text-align: right; color: #ccc; }
+.tp-cost-amount.unaffordable { color: #e05050; font-weight: 600; }
+.tp-insufficient-hint { font-size: 11px; color: #e05050; margin: 4px 0 0; }
+.tp-cost-preview { font-size: 11px; color: #778; margin: 5px 0 6px; }
+
+/* Bootstrap progress bar in tile panel */
+.tp-bootstrap-row   { display: flex; align-items: center; gap: 6px; margin: 4px 0 2px; }
+.tp-bootstrap-bar-bg  { flex: 1; height: 4px; background: rgba(255,255,255,0.12); border-radius: 2px; }
+.tp-bootstrap-bar-fill { height: 100%; background: #4499ee; border-radius: 2px; transition: width 0.4s; }
+.tp-bootstrap-pct   { font-size: 11px; color: #88aacc; white-space: nowrap; }
+.tp-bootstrap-label { font-size: 11px; color: #667; white-space: nowrap; }
+.tp-bootstrap-rem   { font-size: 11px; color: #556; margin-bottom: 6px; }
+
+/* Prod/maint/net table in tile panel */
+.tp-net-header { display: grid; grid-template-columns: 1.2em 1fr 1fr 1fr;
+                 font-size: 10px; color: #445; text-transform: uppercase;
+                 letter-spacing: 0.05em; margin-bottom: 2px; }
+.tp-net-head   { text-align: right; }
+.tp-net-row    { display: grid; grid-template-columns: 1.2em 1fr 1fr 1fr;
+                 font-size: 11px; margin: 1px 0; }
+.tp-net-icon   { }
+.tp-net-val    { text-align: right; }
+
+/* Starvation warning badge */
+.tp-starvation-warn { color: #e08830; font-size: 11px; font-weight: 600; margin: 2px 0 4px; }
+
+/* ── Buildings section (inside tile panel colony area) ── */
+.tp-buildings-section { margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.07); padding-top: 6px; }
+.tp-bld-section-title { font-size: 10px; color: #445; text-transform: uppercase;
+                         letter-spacing: 0.07em; margin-bottom: 4px; }
+.tp-bld-row         { display: flex; align-items: center; gap: 5px;
+                       padding: 2px 0; font-size: 11px; }
+.tp-bld-label       { width: 56px; color: #778; font-size: 10px; flex-shrink: 0; }
+.tp-bld-level       { flex: 1; color: #cde; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-bld-cap         { font-size: 10px; color: #556; white-space: nowrap; }
+.tp-bld-upgrade-btn { font-size: 10px; padding: 2px 6px; border-radius: 4px;
+                       background: rgba(40,80,160,0.55); border: 1px solid rgba(80,140,255,0.35);
+                       color: #9bf; cursor: pointer; white-space: nowrap;
+                       transition: background 0.15s, opacity 0.15s; flex-shrink: 0; }
+.tp-bld-upgrade-btn:hover:not(:disabled) { background: rgba(60,110,220,0.7); color: #fff; }
+.tp-bld-upgrade-btn:disabled { opacity: 0.38; cursor: default; }
+.tp-bld-maint       { font-size: 10px; color: #f90; opacity: 0.72; margin-left: 4px; white-space: nowrap; }
+.tp-bld-maint-delta { font-size: 9px; color: #fa7; opacity: 0.80; margin-left: 3px; white-space: nowrap; }
+.tp-bld-max         { font-size: 10px; padding: 2px 6px; border-radius: 4px;
+                       background: rgba(255,255,255,0.06); color: #445;
+                       border: 1px solid rgba(255,255,255,0.08); white-space: nowrap; flex-shrink: 0; }
+.tp-tier-advance-row { margin-top: 5px; padding-top: 5px;
+                        border-top: 1px solid rgba(255,255,255,0.07);
+                        display: flex; align-items: center; gap: 6px; }
+.tp-tier-advance-label { flex: 1; font-size: 11px; color: #aab; }
+.tp-tier-advance-btn { font-size: 10px; padding: 3px 8px; border-radius: 5px;
+                        background: rgba(120,60,200,0.5); border: 1px solid rgba(160,100,255,0.4);
+                        color: #c9f; cursor: pointer; white-space: nowrap;
+                        transition: background 0.15s, opacity 0.15s; }
+.tp-tier-advance-btn:hover:not(:disabled) { background: rgba(150,80,240,0.7); color: #fff; }
+.tp-tier-advance-btn:disabled { opacity: 0.38; cursor: default; }
+
+/* ── Colony view — left panel ── */
+/* Location strip at top of colony panel */
+.cv-location-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+                      padding: 5px 0 7px; border-bottom: 1px solid rgba(255,255,255,0.07);
+                      font-size: 10px; color: #556; margin-bottom: 8px; }
+.cv-location-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.cv-location-biome  { color: #99aabb; font-weight: 600; }
+.cv-location-coords { margin-left: auto; color: #445; }
+.cv-location-hab    { color: #6c6; }
+.cv-location-hab.low { color: #c44; }
+.cv-location-hab.mid { color: #ca4; }
+
+/* Colony header row: name + close button */
+.cv-header { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.cv-name   { flex: 1; font-size: 16px; font-weight: 700; color: #ddeeff;
+              outline: none; border-radius: 4px; padding: 1px 3px; cursor: text;
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cv-name[contenteditable="true"] { background: rgba(255,255,255,0.06);
+              border: 1px solid rgba(100,160,255,0.4); cursor: text; }
+.cv-close-btn { flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px;
+                background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+                color: #778; font-size: 16px; line-height: 1; cursor: pointer;
+                display: flex; align-items: center; justify-content: center;
+                transition: background 0.15s, color 0.15s; padding: 0; }
+.cv-close-btn:hover { background: rgba(255,60,60,0.2); color: #f88; border-color: rgba(255,80,80,0.3); }
+
+/* Tier + pop subtitle */
+.cv-tier-line { font-size: 11px; color: #445; text-transform: uppercase;
+                letter-spacing: 0.06em; margin-bottom: 8px; }
+
+/* ── Colony bottom resource strip ── */
+#colonyBottomStrip {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: 80px; z-index: 24;
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 0; padding: 0;
+    background: rgba(8,8,28,0.92);
+    backdrop-filter: blur(12px);
+    border-top: 1px solid rgba(255,255,255,0.1);
+}
+#colonyBottomStrip.hidden { display: none; }
+.cbs-col { display: flex; flex-direction: column; justify-content: center;
+           padding: 8px 16px; gap: 4px;
+           border-right: 1px solid rgba(255,255,255,0.07); }
+.cbs-col:last-child { border-right: none; }
+.cbs-label  { font-size: 10px; color: #445; text-transform: uppercase;
+              letter-spacing: 0.07em; font-weight: 600; }
+.cbs-bar-bg { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
+.cbs-bar-fill { height: 100%; border-radius: 3px; width: 0;
+                transition: width 0.4s ease, background-color 0.4s ease; }
+.cbs-bottom { display: flex; justify-content: space-between; align-items: baseline; }
+.cbs-val    { font-size: 12px; font-weight: 600; color: #cde; }
+.cbs-net    { font-size: 11px; }
+.cbs-net.positive { color: #6c6; }
+.cbs-net.negative { color: #c66; }
+.cbs-net.zero     { color: #556; }
+
+/* Shift viz widget above the strip when colony view is active */
+body.colony-view-active #vizWidget { bottom: 96px; }
+
+/* Mobile: strip not shown (bottom sheet handles colony panel) */
+@media (max-width: 768px) {
+    #colonyBottomStrip { display: none !important; }
+    body.colony-view-active #vizWidget { bottom: 16px; }
+}
 
 /* ── Settlement panel (top-right) ── */
 #settlementPanel {
@@ -650,6 +772,45 @@ button#generate.generating {
                 margin-top: 3px; }
 .sp-rate      { display: flex; align-items: center; gap: 2px; }
 .sp-col-pop   { font-size: 10px; color: #445; text-align: right; white-space: nowrap; }
+.sp-col-info  { min-width: 0; }
+
+/* Net rate row in settlement panel */
+.sp-net-row   { display: flex; gap: 10px; padding: 3px 11px 5px;
+                border-bottom: 1px solid rgba(255,255,255,0.05);
+                font-size: 11px; flex-wrap: wrap; }
+.sp-net-item  { white-space: nowrap; }
+.sp-net-positive { color: #6c6; }
+.sp-net-negative { color: #c66; }
+
+/* Pool cap indicator in settlement panel */
+.sp-pool-cap      { font-size: 10px; color: #445; padding: 2px 11px 3px;
+                    border-bottom: 1px solid rgba(255,255,255,0.04); }
+.sp-pool-cap-warn { color: #e08830; }
+
+/* Bootstrap bar in settlement panel */
+.sp-bootstrap-row  { display: flex; align-items: center; gap: 5px; margin: 4px 0 1px; }
+.sp-bootstrap-bar-bg  { flex: 1; height: 3px; background: rgba(255,255,255,0.12); border-radius: 2px; }
+.sp-bootstrap-bar-fill { height: 100%; background: #4499ee; border-radius: 2px; }
+.sp-bootstrap-pct   { font-size: 10px; color: #88aacc; }
+.sp-bootstrap-label { font-size: 10px; color: #556; }
+
+/* Mini prod/maint table in colony row (bootstrapping) */
+.sp-col-mini-table { display: grid; grid-template-columns: 1.2em 1fr 1fr;
+                     font-size: 10px; margin-top: 3px; gap: 0 4px; }
+.sp-col-active-table { grid-template-columns: 1.2em 1fr 1fr 1fr; }
+.sp-mini-head { color: #445; font-size: 9px; text-transform: uppercase;
+                letter-spacing: 0.04em; text-align: right; }
+
+/* Abandonment notice toast */
+.sp-notice {
+    position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%);
+    background: rgba(20,10,10,0.92); backdrop-filter: blur(8px);
+    border: 1px solid rgba(200,80,60,0.4); border-radius: 8px;
+    color: #f99; font-size: 13px; padding: 8px 18px;
+    z-index: 200; pointer-events: none;
+    animation: sp-notice-in 0.3s ease;
+}
+@keyframes sp-notice-in { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
 
 /* ── Colony HUD (legacy invisible element — kept for JS compat) ── */
 #colonyHud { display: none !important; }
@@ -921,8 +1082,6 @@ button#generate.generating {
 
 /* ───── Mobile: tablets + phones ───── */
 @media (max-width: 768px) {
-    #topInfo { display: none; }
-
     /* Bottom sheet */
     #ui {
         position: fixed; bottom: 0; left: 0; right: 0;

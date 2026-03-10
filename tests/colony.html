@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<!--
+  Colony system unit tests
+  ========================
+  Tests all pure functions in js/colony.js in isolation — no worker, no Three.js.
+
+  HOW TO RUN
+  ----------
+  Serve the project root over HTTP (ES module imports require a server):
+      python3 -m http.server 8000
+  Then open: http://localhost:8000/tests/colony.html
+
+  WHAT IS TESTED
+  --------------
+  1. buildingMaintenanceCost — per-building resource drain
+  2. maintenanceCost         — combined population + building drain
+  3. Housing / storage caps
+  4. colonyProductionRates   — formula: tile_potential × 100 × mult × workerFraction
+  5. Multi-colony aggregates — does the loop correctly sum all colonies?
+  6. Tick simulation         — mirrors tickEconomy logic from main.js
+  7. createColony defaults
+  8. canAdvanceTier / foundingCost
+
+  Tests marked [BUG] are EXPECTED TO FAIL until the corresponding code is fixed.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Colony System Tests — Heliosphere</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, sans-serif;
+    background: #0e1117;
+    color: #e6edf3;
+    padding: 2rem;
+    min-height: 100dvh;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  .subtitle { color: #8b949e; font-size: 0.875rem; margin-bottom: 1.5rem; }
+
+  #summary {
+    display: flex; gap: 1.5rem; margin-bottom: 1.5rem; font-size: 0.875rem;
+    flex-wrap: wrap;
+  }
+  .stat { color: #8b949e; }
+  .stat span { font-weight: 700; }
+  #passCount span  { color: #3fb950; }
+  #failCount span  { color: #f85149; }
+  #bugCount span   { color: #d29922; }
+  #skipCount span  { color: #58a6ff; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+  th {
+    text-align: left; padding: 0.5rem 0.75rem; color: #8b949e;
+    border-bottom: 1px solid #30363d; font-weight: 600;
+  }
+  td { padding: 0.45rem 0.75rem; border-bottom: 1px solid #21262d; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+
+  .badge {
+    display: inline-block; padding: 2px 7px; border-radius: 10px;
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em;
+  }
+  .badge-pass   { background: #1a4a1a; color: #3fb950; border: 1px solid #2ea043; }
+  .badge-fail   { background: #3a0a0a; color: #f85149; border: 1px solid #da3633; }
+  .badge-bug    { background: #3a2a00; color: #e3b341; border: 1px solid #d29922; }
+
+  .group-row td {
+    background: #161b22; color: #8b949e; font-size: 0.75rem;
+    font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    padding-top: 0.9rem; padding-bottom: 0.35rem;
+    border-bottom: 1px solid #30363d;
+  }
+
+  .error-detail {
+    font-family: monospace; font-size: 0.75rem; color: #f85149;
+    margin-top: 4px; white-space: pre-wrap; word-break: break-all;
+  }
+  .bug-detail {
+    font-family: monospace; font-size: 0.75rem; color: #e3b341;
+    margin-top: 4px; white-space: pre-wrap;
+  }
+  .name-cell { max-width: 520px; }
+  .running { color: #8b949e; font-style: italic; }
+</style>
+</head>
+<body>
+<h1>Colony System Tests</h1>
+<p class="subtitle">Unit tests for js/colony.js — resource math, building maintenance, multi-colony aggregates</p>
+
+<div id="summary" class="running">Running…</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:70px">Status</th>
+      <th>Test name</th>
+      <th style="width:90px">Group</th>
+    </tr>
+  </thead>
+  <tbody id="tbody"></tbody>
+</table>
+
+<script type="module">
+// ─────────────────────────────────────────────────────────────────────────────
+// Import the module under test
+// ─────────────────────────────────────────────────────────────────────────────
+import {
+  BUILDING_MAINTENANCE,
+  BUILDING_MAINTENANCE_RESOURCE,
+  BUILDING_COSTS,
+  BUILDING_NAMES,
+  BUILDING_TIER_UNLOCK,
+  HOUSING_CAPS,
+  STORAGE_CAPS,
+  FARM_MULTS, WATER_MULTS, MINE_MULTS, FUEL_MULTS,
+  STARTING_POOL,
+  COLONY_TIER_ORDER,
+  TIER_ADVANCE_COSTS,
+  buildingMaintenanceCost,
+  getHousingCap,
+  getStorageContribution,
+  maintenanceCost,
+  createColony,
+  colonyProductionRates,
+  canAdvanceTier,
+  foundingCost,
+} from '../js/colony.js';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Minimal test framework
+// ─────────────────────────────────────────────────────────────────────────────
+let passCount = 0, failCount = 0, bugCount = 0;
+const rows = [];
+let currentGroup = '';
+
+function group(name) { currentGroup = name; }
+
+function deep(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
+function assert(val, msg) {
+  if (!val) throw new Error(msg ?? 'Assertion failed');
+}
+
+function assertEqual(actual, expected, msg) {
+  if (!deep(actual, expected)) {
+    throw new Error(
+      (msg ? msg + '\n' : '') +
+      `  Expected: ${JSON.stringify(expected)}\n` +
+      `  Got:      ${JSON.stringify(actual)}`
+    );
+  }
+}
+
+function assertClose(actual, expected, tol, msg) {
+  if (typeof tol === 'string') { msg = tol; tol = 1; }
+  tol = tol ?? 1;
+  if (Math.abs(actual - expected) > tol) {
+    throw new Error(
+      (msg ? msg + '\n' : '') +
+      `  Expected: ~${expected} (±${tol})\n  Got: ${actual}`
+    );
+  }
+}
+
+// isBug = known broken code; test SHOULD fail, we want a yellow warning not a red fail
+function test(name, fn, isBug = false) {
+  let status, errorMsg = '';
+  try {
+    fn();
+    if (isBug) {
+      // Bug test passed unexpectedly — the bug may have been fixed!
+      passCount++;
+      status = 'pass';
+      errorMsg = '(was marked as known bug but now passes — bug may be fixed)';
+    } else {
+      passCount++;
+      status = 'pass';
+    }
+  } catch (e) {
+    if (isBug) {
+      bugCount++;
+      status = 'bug';
+      errorMsg = e.message;
+    } else {
+      failCount++;
+      status = 'fail';
+      errorMsg = e.message;
+    }
+  }
+  rows.push({ status, name, group: currentGroup, errorMsg });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers shared across tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Build a minimal curData mock with given resource arrays per region. */
+function makeCurData(regionResources) {
+  const n = regionResources.length;
+  const rF = new Float32Array(n), rW = new Float32Array(n),
+        rM = new Float32Array(n), rE = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    rF[i] = regionResources[i].food   ?? 0;
+    rW[i] = regionResources[i].water  ?? 0;
+    rM[i] = regionResources[i].metals ?? 0;
+    rE[i] = regionResources[i].fuel   ?? 0;
+  }
+  return { debugLayers: { resourceFood: rF, resourceWater: rW, resourceMetals: rM, resourceFuel: rE } };
+}
+
+/** Full buildings for all categories at given level (default 1). */
+function allBuildings(level = 1) {
+  return { habitation: level, farm: level, water: level, mine: level, fuel: level, storage: level };
+}
+
+/** Create a colony object directly, bypassing createColony() for test control. */
+function makeColony(overrides = {}) {
+  return {
+    region: 0,
+    population: 250,
+    habitability: 1,
+    bootstrapEndDay: 0,  // already past bootstrap
+    starvationTicks: 0,
+    tier: 'outpost',
+    buildings: { habitation: 1, farm: 0, water: 0, mine: 0, fuel: 0, storage: 0 },
+    ...overrides,
+  };
+}
+
+/** Replicate the tickEconomy pool-mutation logic from main.js (as of last read). */
+function simulateTick(pool, colonies, curData) {
+  const GAME_DAYS = 9999; // well past bootstrap for all
+  for (const colony of colonies) {
+    const rates  = colonyProductionRates(colony, curData);
+    const maint  = maintenanceCost(colony);
+    const inBoot = GAME_DAYS < colony.bootstrapEndDay;
+    const pmult  = inBoot ? 0.20 : 1.0;
+
+    const hadFood = pool.food >= maint.food;
+    pool.food  = Math.max(0, pool.food  - maint.food);
+    pool.water = Math.max(0, pool.water - maint.water);
+    pool.fuel  = Math.max(0, pool.fuel  - maint.fuel);
+    // NOTE: maint.metals is intentionally NOT deducted here (matching current main.js bug)
+
+    pool.food   += Math.round(rates.food   * pmult);
+    pool.water  += Math.round(rates.water  * pmult);
+    pool.metals += Math.round(rates.metals * pmult);
+    pool.fuel   += Math.round(rates.fuel   * pmult);
+
+    colony.starvationTicks = hadFood ? 0 : colony.starvationTicks + 1;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GROUP 1 — Building maintenance constants
+// ─────────────────────────────────────────────────────────────────────────────
+group('Building Maintenance');
+
+test('BUILDING_MAINTENANCE has 6 categories', () => {
+  assertEqual(Object.keys(BUILDING_MAINTENANCE).length, 6);
+});
+
+test('All categories have 4 levels (0–3)', () => {
+  for (const [k, arr] of Object.entries(BUILDING_MAINTENANCE)) {
+    assert(arr.length === 4, `${k} should have 4 entries, got ${arr.length}`);
+    assert(arr[0] === 0, `${k}[0] should be 0 (no cost when unbuilt)`);
+  }
+});
+
+test('BUILDING_MAINTENANCE_RESOURCE maps every category', () => {
+  const cats = Object.keys(BUILDING_MAINTENANCE);
+  for (const cat of cats) {
+    const res = BUILDING_MAINTENANCE_RESOURCE[cat];
+    assert(['food','water','metals','fuel'].includes(res),
+      `${cat} maps to unknown resource: ${res}`);
+  }
+});
+
+test('habitation costs fuel (power)', () => {
+  assertEqual(BUILDING_MAINTENANCE_RESOURCE.habitation, 'fuel');
+  assertEqual(BUILDING_MAINTENANCE.habitation, [0, 1, 4, 12]);
+});
+
+test('farm costs water (irrigation)', () => {
+  assertEqual(BUILDING_MAINTENANCE_RESOURCE.farm, 'water');
+  assertEqual(BUILDING_MAINTENANCE.farm, [0, 3, 10, 30]);
+});
+
+test('mine costs fuel (machinery)', () => {
+  assertEqual(BUILDING_MAINTENANCE_RESOURCE.mine, 'fuel');
+  assertEqual(BUILDING_MAINTENANCE.mine, [0, 3, 12, 35]);
+});
+
+test('fuel extractor costs metals (equipment wear)', () => {
+  assertEqual(BUILDING_MAINTENANCE_RESOURCE.fuel, 'metals');
+  assertEqual(BUILDING_MAINTENANCE.fuel, [0, 2, 8, 25]);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GROUP 2 — buildingMaintenanceCost()
+// ─────────────────────────────────────────────────────────────────────────────
+group('buildingMaintenanceCost');
+
+test('all-zero buildings → all-zero cost', () => {
+  const r = buildingMaintenanceCost({ habitation:0,farm:0,water:0,mine:0,fuel:0,storage:0 });
+  assertEqual(r, { food:0, water:0, metals:0, fuel:0 });
+});
+
+test('undefined buildings → all-zero cost', () => {
+  const r = buildingMaintenanceCost(undefined);
+  assertEqual(r, { food:0, water:0, metals:0, fuel:0 });
+});
+
+test('habitation level 1 → fuel: 1', () => {
+  const r = buildingMaintenanceCost({ habitation:1 });
+  assertEqual(r, { food:0, water:0, metals:0, fuel:1 });
+});
+
+test('farm level 1 → water: 3', () => {
+  const r = buildingMaintenanceCost({ farm:1 });
+  assertEqual(r, { food:0, water:3, metals:0, fuel:0 });
+});
+
+test('mine level 2 → fuel: 12', () => {
+  const r = buildingMaintenanceCost({ mine:2 });
+  assertEqual(r, { food:0, water:0, metals:0, fuel:12 });
+});
+
+test('fuel extractor level 1 → metals: 2', () => {
+  const r = buildingMaintenanceCost({ fuel:1 });
+  assertEqual(r, { food:0, water:0, metals:2, fuel:0 });
+});
+
+test('fuel extractor level 2 → metals: 8', () => {
+  const r = buildingMaintenanceCost({ fuel:2 });
+  assertEqual(r, { food:0, water:0, metals:8, fuel:0 });
+});
+
+test('all buildings at level 1 → correct totals', () => {
+  // habitation→fuel:1, farm→water:3, water(ext)→fuel:2, mine→fuel:3, fuel(ext)→metals:2, storage→fuel:1
+  const r = buildingMaintenanceCost(allBuildings(1));
+  assertEqual(r, { food:0, water:3, metals:2, fuel: 1+2+3+1 }); // fuel=7
+});
+
+test('all buildings at level 2 → correct totals', () => {
+  // habitation→fuel:4, farm→water:10, water→fuel:8, mine→fuel:12, fuel→metals:8, storage→fuel:4
+  const r = buildingMaintenanceCost(allBuildings(2));
+  assertEqual(r, { food:0, water:10, metals:8, fuel: 4+8+12+4 }); // fuel=28
+});
+
+test('all buildings at level 3 → correct totals', () => {
+  // habitation→fuel:12, farm→water:30, water→fuel:20, mine→fuel:35, fuel→metals:25, storage→fuel:12
+  const r = buildingMaintenanceCost(allBuildings(3));
+  assertEqual(r, { food:0, water:30, metals:25, fuel: 12+20+35+12 }); // fuel=79
+});
+
+test('partial buildings sum correctly', () => {
+  // mine=1(fuel:3) + fuel=1(metals:2) + storage=2(fuel:4)
+  const r = buildingMaintenanceCost({ mine:1, fuel:1, storage:2 });
+  assertEqual(r, { food:0, water:0, metals:2, fuel:3+4 }); // fuel=7
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GROUP 3 — maintenanceCost()
+// ─────────────────────────────────────────────────────────────────────────────
+group('maintenanceCost');
+
+test('ideal hab (1.0), pop=1, habitation=1 → baseline', () => {
+  // m=1.0, pop-based: food=round(2.002)=2, water=round(1.001)=1, fuel=round(1)=1
+  // building: habitation level 1 → fuel +=1  →  total fuel=2
+  const r = maintenanceCost(makeColony({ population:1, habitability:1 }));
+  assertEqual(r, { food:2, water:1, fuel:2, metals:0 });
+});
+
+test('harsh hab (0.0), pop=1, no buildings → m=2 doubles pop costs', () => {
+  // m=2.0, food=round(2*2)=4, water=round(1*2)=2, fuel=round(1*2)=2
+  const r = maintenanceCost(makeColony({
+    population:1, habitability:0,
+    buildings:{ habitation:0,farm:0,water:0,mine:0,fuel:0,storage:0 }}));
+  assertEqual(r, { food:4, water:2, fuel:2, metals:0 });
+});
+
+test('middle hab (0.5), pop=1, no buildings → m=1.5', () => {
+  // m=1.5, food=round(2.002*1.5)=round(3.003)=3, water=round(1.001*1.5)=round(1.5015)=2, fuel=round(1*1.5)=2
+  const r = maintenanceCost(makeColony({
+    population:1, habitability:0.5,
+    buildings:{ habitation:0,farm:0,water:0,mine:0,fuel:0,storage:0 }}));
+  assertEqual(r, { food:3, water:2, fuel:2, metals:0 });
+});
+
+test('pop=250 (full outpost), ideal hab → scales food+water correctly', () => {
+  // m=1.0, food=round((2+250*0.002))=round(2.5)=3, water=round((1+250*0.001))=round(1.25)=1
+  // fuel=round(1)+hab_bld(1)=2
+  const r = maintenanceCost(makeColony({ population:250, habitability:1 }));
+  assertEqual(r, { food:3, water:1, fuel:2, metals:0 });
+});
+
+test('fuel extractor level 1 → metals: 2', () => {
+  const r = maintenanceCost(makeColony({
+    buildings:{ habitation:1, farm:0, water:0, mine:0, fuel:1, storage:0 }}));
+  assertEqual(r.metals, 2);
+});
+
+test('all buildings level 1, pop=250, hab=1 → combined cost', () => {
+  // m=1.0
+  // pop-based: food=round(2.5)=3, water=round(1.25)=1, fuel=1, metals=0
+  // building: food=0, water=3(farm), metals=2(fuel_ext), fuel=1(hab)+2(water_ext)+3(mine)+1(storage)=7
+  // total: food=3, water=1+3=4, fuel=1+7=8, metals=2
+  const r = maintenanceCost(makeColony({ population:250, habitability:1, buildings:allBuildings(1) }));
+  assertEqual(r, { food:3, water:4, fuel:8, metals:2 });
+});
+
+test('metals maintenance is non-zero with fuel extractor', () => {
+  const r = maintenanceCost(makeColony({
+    buildings:{ habitation:1, farm:1, water:1, mine:1, fuel:2, storage:1 }}));
+  assert(r.metals > 0, `Expected metals > 0 with fuel extractor level 2, got ${r.metals}`);
+  assertEqual(r.metals, 8); // BUILDING_MAINTENANCE.fuel[2] = 8
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GROUP 4 — Housing / Storage caps
+// ─────────────────────────────────────────────────────────────────────────────
+group('Housing & Storage');
+
+test('getHousingCap: level 0 → 0', () => {
+  assertEqual(getHousingCap({ habitation:0 }), 0);
+});
+test('getHousingCap: level 1 → 250', () => {
+  assertEqual(getHousingCap({ habitation:1 }), 250);
+});
+test('getHousingCap: level 2 → 5000', () => {
+  assertEqual(getHousingCap({ habitation:2 }), 5000);
+});
+test('getHousingCap: level 3 → 100000', () => {
+  assertEqual(getHousingCap({ habitation:3 }), 100000);
+});
+test('getHousingCap: undefined buildings → 0', () => {
+  assertEqual(getHousingCap(undefined), 0);
+});
+
+test('getStorageContribution: level 0 → 0', () => {
+  assertEqual(getStorageContribution({ storage:0 }), 0);
+});
+test('getStorageContribution: level 1 → 2000', () => {
+  assertEqual(getStorageContribution({ storage:1 }), 2000);
+});
+test('getStorageContribution: level 3 → 30000', () => {
+  assertEqual(getStorageContribution({ storage:3 }), 30000);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GROUP 5 — colonyProductionRates()
+// ─────────────────────────────────────────────────────────────────────────────
+group('Production Rates');
+
+test('no curData → all zero', () => {
+  const r = colonyProductionRates(makeColony({ buildings:allBuildings(1) }), null);
+  assertEqual(r, { food:0, water:0, metals:0, fuel:0 });
+});
+
+test('no resource layers → all zero', () => {
+  const r = colonyProductionRates(makeColony({ buildings:allBuildings(1) }), { debugLayers:{} });
+  assertEqual(r, { food:0, water:0, metals:0, fuel:0 });
+});
+
+test('no buildings → all zero even with full resources', () => {
+  const d = makeCurData([{ food:1, water:1, metals:1, fuel:1 }]);
+  const r = colonyProductionRates(makeColony({
+    buildings:{ habitation:1, farm:0, water:0, mine:0, fuel:0, storage:0 }}), d);
+  assertEqual(r, { food:0, water:0, metals:0, fuel:0 });
+});
+
+test('habitation=0 → wf=0 → all zero even with buildings', () => {
+  const d = makeCurData([{ food:1, water:1, metals:1, fuel:1 }]);
+  const r = colonyProductionRates(makeColony({
+    buildings:{ habitation:0, farm:1, water:1, mine:1, fuel:1, storage:0 }}), d);
+  assertEqual(r, { food:0, water:0, metals:0, fuel:0 });
+});
+
+test('farm level 1, full pop → food = floor(res×100×3×1)', () => {
+  const d = makeCurData([{ food:0.5 }]);
+  // wf = 250/250 = 1.0 → food = floor(0.5*100*3*1) = 150
+  const r = colonyProductionRates(makeColony({
+    population:250, buildings:{ habitation:1, farm:1, water:0, mine:0, fuel:0, storage:0 }}), d);
+  assertEqual(r.food, 150);
+});
+
+test('mine level 1, half pop → metals = floor(res×100×3×0.5)', () => {
+  const d = makeCurData([{ metals:0.6 }]);
+  // wf = 125/250 = 0.5 → metals = floor(0.6*100*3*0.5) = floor(90) = 90
+  const r = colonyProductionRates(makeColony({
+    population:125, buildings:{ habitation:1, farm:0, water:0, mine:1, fuel:0, storage:0 }}), d);
+  assertEqual(r.metals, 90);
+});
+
+test('all buildings level 1, full pop → all production computed independently', () => {
+  const d = makeCurData([{ food:0.6, water:0.5, metals:0.4, fuel:0.3 }]);
+  // wf=1.0, each: floor(res*100*3)
+  const r = colonyProductionRates(makeColony({ population:250, buildings:allBuildings(1) }), d);
+  assertEqual(r, {
+    food:   Math.floor(0.6*100*3),  // 180
+    water:  Math.floor(0.5*100*3),  // 150
+    metals: Math.floor(0.4*100*3),  // 120
+    fuel:   Math.floor(0.3*100*3),  // 90
+  });
+});
+
+test('building level 2 multiplier (×10) produces correct output', () => {
+  const d = makeCurData([{ food:0.4 }]);
+  // FARM_MULTS[2]=10, wf=1.0 → floor(0.4*100*10) = 400
+  const r = colonyProductionRates(makeColony({
+    population:250, buildings:{ habitation:1, farm:2, water:0, mine:0, fuel:0, storage:0 }}), d);
+  assertEqual(r.food, 400);
+});
+
+test('population above housing cap behaves like full cap', () => {
+  const d = makeCurData([{ food:0.5 }]);
+  // pop=300 > cap=250 → wf = min(300,250)/250 = 1.0 (same as full)
+  const r1 = colonyProductionRates(makeColony({
+    population:300, buildings:{ habitation:1, farm:1, water:0, mine:0, fuel:0, storage:0 }}), d);
+  const r2 = colonyProductionRates(makeColony({
+    population:250, buildings:{ habitation:1, farm:1, water:0, mine:0, fuel:0, storage:0 }}), d);
+  assertEqual(r1.food, r2.food);
+});
+
+test('two colonies at different regions produce independently', () => {
+  const d = makeCurData([
+    { food:0.6, water:0.5, metals:0.4, fuel:0.3 },  // region 0
+    { food:0.8, water:0.2, metals:0.9, fuel:0.1 },  // region 1
+  ]);
+  const bld = { habitation:1, farm:1, water:1, mine:1, fuel:1, storage:0 };
+  const c0 = makeColony({ region:0, population:250, buildings:bld });
+  const c1 = makeColony({ region:1, population:250, buildings:bld });
+
+  const r0 = colonyProductionRates(c0, d);
+  const r1 = colonyProductionRates(c1, d);
+
+  // Region 0
+  assertEqual(r0, { food:180, water:150, metals:120, fuel:90 });
+  // Region 1
+  assertEqual(r1, { food:240, water:60,  metals:270, fuel:30  });
+  // They must differ
+  assert(r0.food !== r1.food, 'Regions with different resources must produce differently');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GROUP 6 — Multi-colony aggregates
+// ─────────────────────────────────────────────────────────────────────────────
+group('Multi-Colony Aggregate');
+
+test('single colony aggregate equals individual output', () => {
+  const d = makeCurData([{ food:0.6, water:0.5, metals:0.4, fuel:0.3 }]);
+  const c = makeColony({ population:250, buildings:allBuildings(1) });
+  const rates = colonyProductionRates(c, d);
+  const maint = maintenanceCost(c);
+
+  let netFood = 0, netWater = 0, netMetals = 0, netFuel = 0;
+  for (const col of [c]) {
+    const r = colonyProductionRates(col, d);
+    const m = maintenanceCost(col);
+    netFood   += r.food   - m.food;
+    netWater  += r.water  - m.water;
+    netMetals += r.metals - m.metals; // correct with metals maintenance
+    netFuel   += r.fuel   - m.fuel;
+  }
+  assertEqual(netFood,   rates.food   - maint.food);
+  assertEqual(netWater,  rates.water  - maint.water);
+  assertEqual(netMetals, rates.metals - maint.metals);
+  assertEqual(netFuel,   rates.fuel   - maint.fuel);
+});
+
+test('two-colony loop correctly sums both colonies\' food production', () => {
+  const d = makeCurData([
+    { food:0.6 },  // region 0
+    { food:0.8 },  // region 1
+  ]);
+  const bld = { habitation:1, farm:1, water:0, mine:0, fuel:0, storage:0 };
+  const c0 = makeColony({ region:0, population:250, buildings:bld });
+  const c1 = makeColony({ region:1, population:250, buildings:bld });
+
+  const r0 = colonyProductionRates(c0, d);
+  const r1 = colonyProductionRates(c1, d);
+  assertEqual(r0.food, 180); // floor(0.6*100*3)
+  assertEqual(r1.food, 240); // floor(0.8*100*3)
+
+  let agg = 0;
+  for (const c of [c0, c1]) agg += colonyProductionRates(c, d).food;
+  assertEqual(agg, 180 + 240, 'aggregate food must equal sum of individual food production');
+});
+
+test('two-colony net metals correctly includes metals maintenance', () => {
+  // Mine level 1 produces metals; fuel extractor level 1 consumes metals as maintenance.
+  // Net metals per colony = production - maint.metals
+  const d = makeCurData([
+    { metals:0.5 },  // region 0
+    { metals:0.7 },  // region 1
+  ]);
+  const bld = { habitation:1, farm:0, water:0, mine:1, fuel:1, storage:0 };
+  // mine=1 → MINE_MULTS[1]=3 → metals per colony: floor(res*100*3*wf)
+  // fuel=1 → BUILDING_MAINTENANCE.fuel[1]=2 → metals maintenance = 2 per colony
+
+  const c0 = makeColony({ region:0, population:250, buildings:bld });
+  const c1 = makeColony({ region:1, population:250, buildings:bld });
+
+  const r0 = colonyProductionRates(c0, d);
+  const r1 = colonyProductionRates(c1, d);
+  const m0 = maintenanceCost(c0);
+  const m1 = maintenanceCost(c1);
+
+  const expectedProd = r0.metals + r1.metals;
+  const expectedMaint = m0.metals + m1.metals;
+  const expectedNet   = expectedProd - expectedMaint;
+
+  assertEqual(m0.metals, 2, 'fuel level 1 should cost 2 metals/tick');
+  assertEqual(m1.metals, 2, 'fuel level 1 should cost 2 metals/tick');
+  assertClose(r0.metals, 150, 0, `region 0 metals should be floor(0.5*100*3)=150`);
+  assertClose(r1.metals, 210, 0, `region 1 metals should be floor(0.7*100*3)=210`);
+  assertEqual(expectedNet, 150+210 - 2-2, 'net metals across two colonies must subtract metals maintenance');
+});
+
+test('second colony contribution changes aggregate meaningfully', () => {
+  const d = makeCurData([
+    { food:0.1, metals:0.2 },
+    { food:0.9, metals:0.8 },
+  ]);
+  const bld = { habitation:1, farm:1, water:0, mine:1, fuel:0, storage:0 };
+  const c0 = makeColony({ region:0, population:250, buildings:bld });
+  const c1 = makeColony({ region:1, population:250, buildings:bld });
+
+  const singleFood   = colonyProductionRates(c0, d).food;
+  const singleMetals = colonyProductionRates(c0, d).metals;
+
+  let aggFood = 0, aggMetals = 0;
+  for (const c of [c0, c1]) {
+    const r = colonyProductionRates(c, d);
+    aggFood   += r.food;
+    aggMetals += r.metals;
+  }
+
+  assert(aggFood > singleFood,
+    `Two colonies should produce more food (${aggFood}) than one (${singleFood})`);
+  assert(aggMetals > singleMetals,
+    `Two colonies should produce more metals (${aggMetals}) than one (${singleMetals})`);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GROUP 7 — Tick simulation (mirrors tickEconomy in main.js)
+// ─────────────────────────────────────────────────────────────────────────────
+group('Tick Simulation');
+
+test('tick adds production to pool', () => {
+  const d = makeCurData([{ food:0.5, water:0.4, metals:0.3, fuel:0.6 }]);
+  const c = makeColony({ population:250, buildings:allBuildings(1) });
+  const pool = { food:100, water:100, metals:100, fuel:100 };
+  const rates = colonyProductionRates(c, d);
+  const maint = maintenanceCost(c);
+
+  simulateTick(pool, [c], d);
+
+  assertEqual(pool.food,  100 - maint.food  + rates.food,  'food after one tick');
+  assertEqual(pool.water, 100 - maint.water + rates.water, 'water after one tick');
+  assertEqual(pool.fuel,  100 - maint.fuel  + rates.fuel,  'fuel after one tick');
+});
+
+test('tick: metals production adds to pool', () => {
+  const d = makeCurData([{ metals:0.5 }]);
+  const c = makeColony({
+    population:250, buildings:{ habitation:1, farm:0, water:0, mine:1, fuel:0, storage:0 }});
+  const pool = { food:100, water:100, metals:100, fuel:100 };
+  const rates = colonyProductionRates(c, d);
+
+  simulateTick(pool, [c], d);
+
+  // metals production = floor(0.5*100*3) = 150
+  assertEqual(rates.metals, 150);
+  assert(pool.metals > 100, `metals should increase after tick, got ${pool.metals}`);
+});
+
+test('[BUG] tick deducts metals maintenance from pool', () => {
+  // A colony with fuel extractor level 1 should drain 2 metals/tick from the pool.
+  // Current tickEconomy does NOT deduct maint.metals — this test fails until fixed.
+  const d = makeCurData([{ fuel:0 }]); // no fuel production so we isolate maintenance
+  const c = makeColony({
+    population:250, buildings:{ habitation:1, farm:0, water:0, mine:0, fuel:1, storage:0 }});
+  const pool = { food:500, water:500, metals:500, fuel:500 };
+  const maint = maintenanceCost(c);
+
+  assertEqual(maint.metals, 2, 'fuel extractor level 1 should cost 2 metals/tick');
+
+  simulateTick(pool, [c], d);
+
+  const expectedMetals = 500 - maint.metals; // 498
+  assertEqual(pool.metals, expectedMetals,
+    `Pool metals should be ${expectedMetals} after maintenance deduction, got ${pool.metals}`);
+}, true /* isBug */);
+
+test('tick: no food production causes starvation tick', () => {
+  const d = makeCurData([{ food:0 }]);
+  const c = makeColony({
+    population:250, habitability:1,
+    buildings:{ habitation:1, farm:0, water:0, mine:0, fuel:0, storage:0 }});
+  const pool = { food:0, water:500, metals:500, fuel:500 };
+
+  simulateTick(pool, [c], d);
+
+  assertEqual(c.starvationTicks, 1, 'should get 1 starvation tick when food pool empty');
+});
+
+test('tick: sufficient food resets starvation counter', () => {
+  const d = makeCurData([{ food:0.5 }]);
+  const c = makeColony({
+    starvationTicks:2,
+    buildings:{ habitation:1, farm:1, water:0, mine:0, fuel:0, storage:0 }});
+  const pool = { food:500, water:500, metals:500, fuel:500 };
+
+  simulateTick(pool, [c], d);
+
+  assertEqual(c.starvationTicks, 0, 'starvation ticks should reset when food is available');
+});
+
+test('two-colony tick: both colonies contribute to pool', () => {
+  const d = makeCurData([
+    { food:0.4, metals:0.3 },  // region 0
+    { food:0.6, metals:0.7 },  // region 1
+  ]);
+  const bld = { habitation:1, farm:1, water:0, mine:1, fuel:0, storage:0 };
+  const c0  = makeColony({ region:0, population:250, buildings:bld });
+  const c1  = makeColony({ region:1, population:250, buildings:bld });
+  const pool = { food:0, water:0, metals:0, fuel:0 };
+
+  simulateTick(pool, [c0, c1], d);
+
+  const r0 = colonyProductionRates(c0, d);
+  const r1 = colonyProductionRates(c1, d);
+  const m0 = maintenanceCost(c0);
+  const m1 = maintenanceCost(c1);
+
+  const expectedFood   = (r0.food - m0.food)   + (r1.food - m1.food);
+  const expectedMetals = r0.metals + r1.metals; // tick doesn't deduct metals maint (known bug)
+
+  assertEqual(pool.food, Math.max(0, expectedFood),
+    'pool food must equal sum of both colonies' net food');
+  assertEqual(pool.metals, expectedMetals,
+    'pool metals must include production from BOTH colonies');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GROUP 8 — createColony defaults
+// ─────────────────────────────────────────────────────────────────────────────
+group('createColony');
+
+test('colony starts with population 1', () => {
+  const c = createColony({ bodyId:'b',region:0,lat:0,lon:0,name:'Test',gameDays:0,habitability:1 });
+  assertEqual(c.population, 1);
+});
+
+test('colony starts with tier outpost', () => {
+  const c = createColony({ bodyId:'b',region:0,lat:0,lon:0,name:'Test',gameDays:0,habitability:1 });
+  assertEqual(c.tier, 'outpost');
+});
+
+test('bootstrap duration: ideal hab → 90 days', () => {
+  const c = createColony({ bodyId:'b',region:0,lat:0,lon:0,name:'Test',gameDays:0,habitability:1 });
+  assertEqual(c.bootstrapEndDay, 90);
+});
+
+test('bootstrap duration: worst hab → 180 days', () => {
+  const c = createColony({ bodyId:'b',region:0,lat:0,lon:0,name:'Test',gameDays:0,habitability:0 });
+  assertEqual(c.bootstrapEndDay, 180);
+});
+
+test('bootstrap respects gameDays offset', () => {
+  const c = createColony({ bodyId:'b',region:0,lat:0,lon:0,name:'Test',gameDays:500,habitability:1 });
+  assertEqual(c.bootstrapEndDay, 500 + 90);
+});
+
+test('starts with habitation=1, rest=0', () => {
+  const c = createColony({ bodyId:'b',region:0,lat:0,lon:0,name:'Test',gameDays:0,habitability:1 });
+  assertEqual(c.buildings, { habitation:1, farm:0, water:0, mine:0, fuel:0, storage:0 });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GROUP 9 — canAdvanceTier / foundingCost
+// ─────────────────────────────────────────────────────────────────────────────
+group('Tier & Founding');
+
+test('canAdvanceTier: outpost needs 100 pop → false at 99', () => {
+  assertEqual(canAdvanceTier({ tier:'outpost', population:99 }), false);
+});
+
+test('canAdvanceTier: outpost needs 100 pop → true at 100', () => {
+  assertEqual(canAdvanceTier({ tier:'outpost', population:100 }), true);
+});
+
+test('canAdvanceTier: megacity → always false (no tier above)', () => {
+  assertEqual(canAdvanceTier({ tier:'megacity', population:1e12 }), false);
+});
+
+test('foundingCost: ideal hab (1.0) → base costs', () => {
+  // m = 1 + (1-1) = 1
+  const r = foundingCost(1.0);
+  assertEqual(r, { food:50, water:50, metals:100, fuel:50 });
+});
+
+test('foundingCost: worst hab (0.0) → doubled costs', () => {
+  // m = 1 + (1-0) = 2
+  const r = foundingCost(0.0);
+  assertEqual(r, { food:100, water:100, metals:200, fuel:100 });
+});
+
+test('foundingCost: hab clamped at 0 (negative input)', () => {
+  const r = foundingCost(-0.5);
+  assertEqual(r, { food:100, water:100, metals:200, fuel:100 });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Render results
+// ─────────────────────────────────────────────────────────────────────────────
+const totalTests = passCount + failCount + bugCount;
+const tbody = document.getElementById('tbody');
+let lastGroup = '';
+
+for (const row of rows) {
+  if (row.group !== lastGroup) {
+    lastGroup = row.group;
+    const gtr = document.createElement('tr');
+    gtr.className = 'group-row';
+    gtr.innerHTML = `<td colspan="3">${row.group}</td>`;
+    tbody.appendChild(gtr);
+  }
+
+  const tr = document.createElement('tr');
+  const badgeCls = row.status === 'pass' ? 'badge-pass'
+                 : row.status === 'bug'  ? 'badge-bug'
+                 : 'badge-fail';
+  const label    = row.status === 'pass' ? 'PASS'
+                 : row.status === 'bug'  ? 'KNOWN BUG'
+                 : 'FAIL';
+
+  let detail = '';
+  if (row.errorMsg) {
+    const cls = row.status === 'bug' ? 'bug-detail' : 'error-detail';
+    const prefix = row.status === 'bug'
+      ? (row.status === 'pass' ? 'Fixed: ' : 'Expected failure: ')
+      : '';
+    detail = `<div class="${cls}">${prefix}${escHtml(row.errorMsg)}</div>`;
+  }
+
+  tr.innerHTML = `
+    <td><span class="badge ${badgeCls}">${label}</span></td>
+    <td class="name-cell">${escHtml(row.name)}${detail}</td>
+    <td style="color:#555;font-size:0.75rem">${escHtml(row.group)}</td>`;
+  tbody.appendChild(tr);
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+const summary = document.getElementById('summary');
+summary.classList.remove('running');
+summary.innerHTML = `
+  <div class="stat" id="passCount">Tests: <span>${totalTests}</span></div>
+  <div class="stat" id="passCount">✅ Pass: <span>${passCount}</span></div>
+  <div class="stat" id="failCount">❌ Fail: <span>${failCount}</span></div>
+  <div class="stat" id="bugCount">⚠️ Known bugs: <span>${bugCount}</span></div>
+`;
+
+if (failCount > 0) summary.style.borderLeft = '3px solid #f85149';
+else if (bugCount > 0) summary.style.borderLeft = '3px solid #d29922';
+else summary.style.borderLeft = '3px solid #3fb950';
+summary.style.paddingLeft = '12px';
+
+</script>
+</body>
+</html>

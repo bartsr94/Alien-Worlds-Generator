@@ -11,7 +11,10 @@ import { detailFromSlider } from './core/detail-scale.js';
 import { KOPPEN_CLASSES } from './sim/koppen.js';
 import { elevToHeightKm } from './render/color-map.js';
 import { RESOURCE_TYPES, RESOURCE_LABELS, RESOURCE_ICONS, RESOURCE_COLORS } from './resources-gen.js';
-import { getTier, createColony, colonyProductionRates } from './colony.js';
+import { getTier, getTierFromPop, createColony, colonyProductionRates, foundingCost, maintenanceCost, STARTING_POOL,
+    BUILDING_COSTS, BUILDING_NAMES, BUILDING_TIER_UNLOCK, TIER_ADVANCE_COSTS, COLONY_TIER_ORDER,
+    BUILDING_MAINTENANCE, BUILDING_MAINTENANCE_RESOURCE,
+    getHousingCap, canAdvanceTier } from './colony.js';
 import { getGameDays } from './game-clock.js';
 
 const raycaster = new THREE.Raycaster();
@@ -262,35 +265,395 @@ function buildResourceSectionHTML(region) {
 }
 
 /** Build the colony section HTML for a tile panel (founded or founding UI). */
+/** Returns true if the body pool covers all costs in the cost object. */
+function canAfford(cost, pool) {
+    return !!pool && RESOURCE_TYPES.every(t => (pool[t] ?? 0) >= (cost[t] ?? 0));
+}
+
 function buildColonySectionHTML(region) {
-    const bodyId = state.activeBodyId || 'standalone';
+    const bodyId  = state.activeBodyId || 'standalone';
     const colony  = state.colonies.find(c => c.bodyId === bodyId && c.region === region);
+    const pool    = state.bodyPools[bodyId];
+    const d       = state.curData;
+
     if (colony) {
-        const tier  = getTier(colony.population);
-        const rates = colonyProductionRates(colony, state.curData);
-        return `<div class="tp-colony-name">${htmlEsc(colony.name)}</div>
-<div class="tp-colony-tier">${tier.name} &middot; Pop. ${colony.population.toLocaleString()}</div>
-<div class="tp-sectitle" style="margin-top:6px;margin-bottom:4px">STOCKPILE</div>
-<div class="tp-colony-rates">
-  <span class="tp-rate-item">${RESOURCE_ICONS.food} ${colony.stockpile.food.toLocaleString()}</span>
-  <span class="tp-rate-item">${RESOURCE_ICONS.water} ${colony.stockpile.water.toLocaleString()}</span>
-  <span class="tp-rate-item">${RESOURCE_ICONS.metals} ${colony.stockpile.metals.toLocaleString()}</span>
-  <span class="tp-rate-item">${RESOURCE_ICONS.fuel} ${colony.stockpile.fuel.toLocaleString()}</span>
+        const tier   = getTier(colony);
+        const rates  = colonyProductionRates(colony, d);
+        const maint  = maintenanceCost(colony);
+        const now    = getGameDays();
+        const inBootstrap = now < colony.bootstrapEndDay;
+
+        const TIER_LABELS = { outpost: 'Outpost', settlement: 'Settlement', colony: 'Colony', city: 'City', megacity: 'Megacity' };
+        const pop = colony.population >= 1e6 ? (colony.population / 1e6).toFixed(1) + 'M'
+                  : colony.population >= 1e3 ? Math.round(colony.population / 1e3) + 'K'
+                  : colony.population.toLocaleString();
+
+        const starvHTML = colony.starvationTicks > 0
+            ? `<div class="tp-starvation-warn">⚠ Starving (${colony.starvationTicks}/3 ticks) — food shortage</div>`
+            : '';
+
+        if (inBootstrap) {
+            const pct = Math.min(100, Math.round((now - colony.foundedAtDay) / Math.max(1, colony.bootstrapEndDay - colony.foundedAtDay) * 100));
+            const rem = Math.max(0, Math.round(colony.bootstrapEndDay - now));
+            const prodMult = 0.20;
+            return `<div class="tp-colony-name">${htmlEsc(colony.name)}</div>
+<div class="tp-colony-tier">${TIER_LABELS[tier.name] ?? tier.name} &middot; Pop. ${pop}</div>
+${starvHTML}
+<div class="tp-bootstrap-row">
+  <div class="tp-bootstrap-bar-bg"><div class="tp-bootstrap-bar-fill" style="width:${pct}%"></div></div>
+  <span class="tp-bootstrap-pct">${pct}%</span>
+  <span class="tp-bootstrap-label">Establishing&hellip;</span>
 </div>
-<div class="tp-sectitle" style="margin-top:8px;margin-bottom:4px">PRODUCTION / TICK</div>
+<div class="tp-bootstrap-rem">${rem} days remaining</div>
+<div class="tp-sectitle" style="margin-top:8px;margin-bottom:4px">MAINTENANCE (per tick)</div>
 <div class="tp-colony-rates">
-  <span class="tp-rate-item">${RESOURCE_ICONS.food} +${rates.food}</span>
-  <span class="tp-rate-item">${RESOURCE_ICONS.water} +${rates.water}</span>
-  <span class="tp-rate-item">${RESOURCE_ICONS.metals} +${rates.metals}</span>
-  <span class="tp-rate-item">${RESOURCE_ICONS.fuel} +${rates.fuel}</span>
+  <span class="tp-rate-item tp-neg">${RESOURCE_ICONS.food} &minus;${maint.food}</span>
+  <span class="tp-rate-item tp-neg">${RESOURCE_ICONS.water} &minus;${maint.water}</span>
+  <span class="tp-rate-item tp-neg">${RESOURCE_ICONS.fuel} &minus;${maint.fuel}</span>
+</div>
+<div class="tp-sectitle" style="margin-top:8px;margin-bottom:4px">PRODUCTION (20%)</div>
+<div class="tp-colony-rates">
+  <span class="tp-rate-item tp-pos">${RESOURCE_ICONS.food} +${Math.round(rates.food * prodMult)}</span>
+  <span class="tp-rate-item tp-pos">${RESOURCE_ICONS.water} +${Math.round(rates.water * prodMult)}</span>
+  <span class="tp-rate-item tp-pos">${RESOURCE_ICONS.metals} +${Math.round(rates.metals * prodMult)}</span>
+  <span class="tp-rate-item tp-pos">${RESOURCE_ICONS.fuel} +${Math.round(rates.fuel * prodMult)}</span>
+</div>
+${buildBuildingsHTML(colony, pool)}`;
+        }
+
+        // Active colony — prod / maint / net table
+        const rows = [
+            [RESOURCE_ICONS.food,   rates.food,   maint.food,   rates.food   - maint.food],
+            [RESOURCE_ICONS.water,  rates.water,  maint.water,  rates.water  - maint.water],
+            [RESOURCE_ICONS.metals, rates.metals, 0,            rates.metals],
+            [RESOURCE_ICONS.fuel,   rates.fuel,   maint.fuel,   rates.fuel   - maint.fuel],
+        ];
+        const rowHTML = rows.map(([icon, prod, m, net]) => {
+            const netCls = net >= 0 ? 'tp-pos' : 'tp-neg';
+            return `<div class="tp-net-row">
+  <span class="tp-net-icon">${icon}</span>
+  <span class="tp-net-val tp-pos">+${prod}</span>
+  <span class="tp-net-val tp-neg">&minus;${m}</span>
+  <span class="tp-net-val ${netCls}">${net >= 0 ? '+' : ''}${net}</span>
+</div>`;
+        }).join('');
+
+        return `<div class="tp-colony-name">${htmlEsc(colony.name)}</div>
+<div class="tp-colony-tier">${TIER_LABELS[tier.name] ?? tier.name} &middot; Pop. ${pop}</div>
+${starvHTML}
+<div class="tp-net-header">
+  <span></span><span class="tp-net-head">Prod</span><span class="tp-net-head">Maint</span><span class="tp-net-head">Net</span>
+</div>
+${rowHTML}
+${buildBuildingsHTML(colony, pool)}`;
+    }
+
+    // No colony — show founding cost if climate is ready (habitability is valid)
+    if (!state.climateComputed || !d?.debugLayers?.habitability) {
+        return `<div class="tp-colony-empty">Run climate simulation to found colonies.</div>`;
+    }
+
+    const hab  = Math.max(0, Math.min(1, d.debugLayers.habitability[region]));
+    const cost = foundingCost(hab);
+    const bootstrapDuration = Math.round(90 + 90 * (1 - hab));
+    const maint0 = maintenanceCost({ habitability: hab, population: 1 });
+
+    const costRows = RESOURCE_TYPES.map(t => {
+        const insufficient = pool && pool[t] < cost[t];
+        return `<div class="tp-cost-row">
+  <span class="tp-cost-label">${RESOURCE_ICONS[t]}&nbsp;${RESOURCE_LABELS[t]}</span>
+  <span class="tp-cost-amount${insufficient ? ' unaffordable' : ''}">${cost[t]}</span>
+</div>`;
+    }).join('');
+
+    const affordable = canAfford(cost, pool);
+    const insufficientHint = !affordable && pool
+        ? `<div class="tp-insufficient-hint">Insufficient resources</div>`
+        : '';
+
+    return `<div class="tp-colony-empty">No settlement here yet.</div>
+<div class="tp-sectitle" style="margin-top:8px;margin-bottom:4px">FOUNDING COST</div>
+${costRows}
+${insufficientHint}
+<div class="tp-cost-preview">Est. bootstrap: ${bootstrapDuration} days &middot; ${RESOURCE_ICONS.food}&minus;${maint0.food}/tick &middot; includes Hab Pod</div>
+<div class="tp-colony-name-row">
+  <input class="tp-colony-name-input" id="tp-colony-name" type="text" placeholder="Settlement name\u2026" maxlength="40">
+</div>
+<button class="tp-found-btn${affordable ? ' enabled' : ''}" id="tp-found-btn"${affordable ? '' : ' disabled'}>&#x2295; Found Settlement</button>`;
+}
+
+/**
+ * Build the BUILDINGS section HTML for an active colony.
+ * Shows all 6 building categories with current level and upgrade button.
+ */
+function buildBuildingsHTML(colony, pool) {
+    const CATEGORIES = ['habitation', 'farm', 'water', 'mine', 'fuel', 'storage'];
+    const CAT_LABELS = {
+        habitation: 'Habitation', farm: 'Farm', water: 'Water Ext.',
+        mine: 'Mine', fuel: 'Fuel Ext.', storage: 'Storage',
+    };
+    const metals = pool?.metals ?? 0;
+    const MAINT_ICONS = { food: '🍖', water: '💧', metals: '⛏', fuel: '⚡' };
+
+    // Tier advance row
+    let tierAdvHTML = '';
+    const advCost = TIER_ADVANCE_COSTS[colony.tier];
+    const tierIdx  = COLONY_TIER_ORDER.indexOf(colony.tier);
+    const nextTierName = tierIdx >= 0 && tierIdx < COLONY_TIER_ORDER.length - 1
+        ? COLONY_TIER_ORDER[tierIdx + 1] : null;
+    if (nextTierName && canAdvanceTier(colony)) {
+        const canPay = metals >= advCost;
+        const TIER_LABELS = { outpost: 'Outpost', settlement: 'Settlement', colony: 'Colony', city: 'City', megacity: 'Megacity' };
+        tierAdvHTML = `<div class="tp-tier-advance-row">
+  <span class="tp-bld-name">Advance tier</span>
+  <button class="tp-tier-advance-btn${canPay ? '' : ' disabled'}" data-tier-advance="1"${canPay ? '' : ' disabled'}>
+    &#x276F; ${TIER_LABELS[nextTierName]} &nbsp; &#x26CF; ${advCost}
+  </button>
 </div>`;
     }
-    const canFound = !!(state.curData?.debugLayers?.resourceFood);
-    return `<div class="tp-colony-empty">No settlement here yet.</div>
-<div class="tp-colony-name-row">
-  <input class="tp-colony-name-input" id="tp-colony-name" type="text" placeholder="Settlement name\u2026" maxlength="40"${canFound ? '' : ' disabled'}>
+
+    const rowsHTML = CATEGORIES.map(cat => {
+        const level     = colony.buildings[cat] ?? 0;
+        const maxLevel  = BUILDING_COSTS[cat].length - 1; // 3
+        const nextLevel = level + 1;
+        const levelName = BUILDING_NAMES[cat][level] ?? '—';
+        const housingCap = cat === 'habitation'
+            ? ` <span class="tp-bld-cap">(cap: ${getHousingCap(colony.buildings).toLocaleString()})</span>` : '';
+
+        const maintRes     = BUILDING_MAINTENANCE_RESOURCE[cat];
+        const maintCostNow = level > 0 ? (BUILDING_MAINTENANCE[cat][level] ?? 0) : 0;
+        const maintTagNow  = maintCostNow > 0
+            ? ` <span class="tp-bld-maint">${MAINT_ICONS[maintRes]}${maintCostNow}/t</span>` : '';
+
+        if (level >= maxLevel) {
+            return `<div class="tp-bld-row">
+  <span class="tp-bld-name">${CAT_LABELS[cat]}</span>
+  <span class="tp-bld-level">${levelName}${housingCap}${maintTagNow}</span>
+  <span class="tp-bld-max">MAX</span>
+</div>`;
+        }
+
+        const upgradeCost   = BUILDING_COSTS[cat][nextLevel];
+        const unlockTier    = BUILDING_TIER_UNLOCK[nextLevel];
+        const tierOk        = COLONY_TIER_ORDER.indexOf(colony.tier) >= COLONY_TIER_ORDER.indexOf(unlockTier);
+        const canAffordUpg  = metals >= upgradeCost;
+        const enabled       = tierOk && canAffordUpg;
+        const disabledAttr  = enabled ? '' : ' disabled';
+        const disabledCls   = enabled ? '' : ' disabled';
+        const nextName      = BUILDING_NAMES[cat][nextLevel];
+        const tipText       = !tierOk ? `Requires ${unlockTier[0].toUpperCase() + unlockTier.slice(1)} tier` : '';
+        const maintNext     = BUILDING_MAINTENANCE[cat][nextLevel] ?? 0;
+        const maintDelta    = maintNext - maintCostNow;
+        const maintDeltaTag = maintDelta > 0
+            ? ` <span class="tp-bld-maint-delta">+${MAINT_ICONS[maintRes]}${maintDelta}/t</span>` : '';
+
+        return `<div class="tp-bld-row">
+  <span class="tp-bld-name">${CAT_LABELS[cat]}</span>
+  <span class="tp-bld-level">${levelName}${housingCap}${maintTagNow}</span>
+  <button class="tp-bld-upgrade-btn${disabledCls}" data-bld-cat="${cat}"${disabledAttr} title="${tipText}">
+    &#x276F; ${nextName} &nbsp; &#x26CF; ${upgradeCost}${maintDeltaTag}
+  </button>
+</div>`;
+    }).join('');
+
+    return `<div class="tp-sectitle" style="margin-top:10px;margin-bottom:4px">BUILDINGS</div>
+<div class="tp-buildings-section">
+${rowsHTML}
 </div>
-<button class="tp-found-btn" id="tp-found-btn" disabled>&#x2295; Found Settlement</button>`;
+${tierAdvHTML}`;
+}
+
+/** Build the inner HTML for the dedicated colony left-panel view. */
+function buildColonyPanelHTML(region) {
+    const d      = state.curData;
+    const bodyId = state.activeBodyId || 'standalone';
+    const colony = state.colonies.find(c => c.bodyId === bodyId && c.region === region);
+    const pool   = state.bodyPools[bodyId];
+
+    // --- Location strip ---
+    let biomeName = 'Unknown', biomeHex = '#334455', koppenCode = '';
+    if (d) {
+        const plate   = d.r_plate[region];
+        const isOcean = d.plateIsOcean.has(plate);
+        biomeName = isOcean ? 'Ocean' : 'Land';
+        biomeHex  = isOcean ? '#1a4488' : '#3a6a2a';
+        if (state.climateComputed && d.debugLayers?.koppen) {
+            const kc = KOPPEN_CLASSES[d.debugLayers.koppen[region]];
+            if (kc) {
+                biomeName = kc.name; koppenCode = kc.code;
+                const [r, g, b] = kc.color;
+                biomeHex = '#' + [r, g, b].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+            }
+        }
+    }
+    const rx  = d?.r_xyz?.[3 * region] ?? 0, ry = d?.r_xyz?.[3 * region + 1] ?? 0, rz = d?.r_xyz?.[3 * region + 2] ?? 0;
+    const lat = Math.asin(Math.max(-1, Math.min(1, ry))) * (180 / Math.PI);
+    const lon = Math.atan2(rx, rz) * (180 / Math.PI);
+    const latStr = Math.abs(lat).toFixed(1) + '\u00b0' + (lat >= 0 ? 'N' : 'S');
+    const lonStr = Math.abs(lon).toFixed(1) + '\u00b0' + (lon >= 0 ? 'E' : 'W');
+    let habHTML = '';
+    if (state.climateComputed && d?.debugLayers?.habitability) {
+        const hab = Math.max(0, Math.min(1, d.debugLayers.habitability[region]));
+        const pct = Math.round(hab * 100);
+        const cls = hab < 0.25 ? 'low' : hab < 0.55 ? 'mid' : '';
+        habHTML = `<span class="cv-location-hab ${cls}">\u2665 ${pct}% hab</span>`;
+    }
+
+    const locationStrip = `<div class="cv-location-strip">
+  <span class="cv-location-swatch" style="background:${biomeHex}"></span>
+  <span class="cv-location-biome">${biomeName}${koppenCode ? ` \u00b7 ${koppenCode}` : ''}</span>
+  <span class="cv-location-coords">${latStr}, ${lonStr}</span>
+  ${habHTML}
+</div>`;
+
+    // --- No colony: show founding form ---
+    if (!colony) {
+        if (!state.climateComputed || !d?.debugLayers?.habitability) {
+            return `${locationStrip}
+<div class="cv-header">
+  <span class="cv-name" style="font-size:13px;color:#556">No Settlement</span>
+  <button class="cv-close-btn" id="cv-close-btn">&times;</button>
+</div>
+<div class="tp-colony-empty" style="margin-top:8px;">Run climate simulation to found settlements.</div>`;
+        }
+        const hab  = Math.max(0, Math.min(1, d.debugLayers.habitability[region]));
+        const cost = foundingCost(hab);
+        const bootstrapDuration = Math.round(90 + 90 * (1 - hab));
+        const maint0 = maintenanceCost({ habitability: hab, population: 1 });
+        const costRows = RESOURCE_TYPES.map(t =>
+            `<div class="tp-row"><span class="tp-lbl">${RESOURCE_ICONS[t]} ${RESOURCE_LABELS[t]}</span><span class="tp-val">${cost[t]}</span></div>`
+        ).join('');
+        if (!pool) {
+            return `${locationStrip}
+<div class="cv-header">
+  <span class="cv-name" style="font-size:13px;color:#556">No Settlement</span>
+  <button class="cv-close-btn" id="cv-close-btn">&times;</button>
+</div>
+<div class="tp-colony-empty" style="margin-top:8px;">No resource pool found for this body.</div>`;
+        }
+        const canFound = canAfford(cost, pool);
+        return `${locationStrip}
+<div class="cv-header">
+  <input type="text" id="cv-found-name" class="cv-name" placeholder="Settlement name\u2026" style="font-size:14px;background:rgba(255,255,255,0.06);border:1px solid rgba(100,160,255,0.3);padding:3px 6px;border-radius:4px;color:#ddeeff;outline:none;width:100%;box-sizing:border-box;">
+  <button class="cv-close-btn" id="cv-close-btn">&times;</button>
+</div>
+<div class="tp-sectitle" style="margin-top:8px">FOUNDING COST</div>
+${costRows}
+<div class="tp-bootstrap-info" style="margin:6px 0 8px;font-size:10px;color:#556">Bootstrap: ~${bootstrapDuration} days &middot; includes Hab Pod infrastructure</div>
+<button class="tp-found-btn ${canFound ? 'enabled' : ''}" id="cv-found-btn" ${canFound ? '' : 'disabled'}>&#x2295; Found Settlement</button>`;
+    }
+
+    // --- Existing colony ---
+    const TIER_LABELS = { outpost: 'Outpost', settlement: 'Settlement', colony: 'Colony', city: 'City', megacity: 'Megacity' };
+    const tier  = getTier(colony);
+    const rates = colonyProductionRates(colony, d);
+    const maint = maintenanceCost(colony);
+    const now   = getGameDays();
+    const inBootstrap = now < colony.bootstrapEndDay;
+    const housingCap  = getHousingCap(colony.buildings);
+
+    const pop = colony.population >= 1e6 ? (colony.population / 1e6).toFixed(1) + 'M'
+              : colony.population >= 1e3 ? Math.round(colony.population / 1e3) + 'K'
+              : colony.population.toLocaleString();
+
+    const starvHTML = colony.starvationTicks > 0
+        ? `<div class="tp-starvation-warn">\u26a0 Starving (${colony.starvationTicks}/3 ticks) \u2014 food shortage</div>\n`
+        : '';
+
+    let econHTML;
+    if (inBootstrap) {
+        const pct = Math.min(100, Math.round((now - colony.foundedAtDay) / Math.max(1, colony.bootstrapEndDay - colony.foundedAtDay) * 100));
+        const rem = Math.max(0, Math.round(colony.bootstrapEndDay - now));
+        const prodMult = 0.20;
+        econHTML = `<div class="tp-bootstrap-row">
+  <div class="tp-bootstrap-bar-bg"><div class="tp-bootstrap-bar-fill" style="width:${pct}%"></div></div>
+  <span class="tp-bootstrap-pct">${pct}%</span>
+  <span class="tp-bootstrap-label">Establishing\u2026</span>
+</div>
+<div class="tp-bootstrap-rem">${rem} days remaining</div>
+<div class="tp-sectitle" style="margin-top:8px;margin-bottom:4px">MAINTENANCE</div>
+<div class="tp-colony-rates">
+  <span class="tp-rate-item tp-neg">${RESOURCE_ICONS.food} \u2212${maint.food}</span>
+  <span class="tp-rate-item tp-neg">${RESOURCE_ICONS.water} \u2212${maint.water}</span>
+  <span class="tp-rate-item tp-neg">${RESOURCE_ICONS.fuel} \u2212${maint.fuel}</span>
+</div>
+<div class="tp-sectitle" style="margin-top:6px;margin-bottom:4px">PRODUCTION (20%)</div>
+<div class="tp-colony-rates">
+  <span class="tp-rate-item tp-pos">${RESOURCE_ICONS.food} +${Math.round(rates.food * prodMult)}</span>
+  <span class="tp-rate-item tp-pos">${RESOURCE_ICONS.water} +${Math.round(rates.water * prodMult)}</span>
+  <span class="tp-rate-item tp-pos">${RESOURCE_ICONS.metals} +${Math.round(rates.metals * prodMult)}</span>
+  <span class="tp-rate-item tp-pos">${RESOURCE_ICONS.fuel} +${Math.round(rates.fuel * prodMult)}</span>
+</div>`;
+    } else {
+        const rows = [
+            [RESOURCE_ICONS.food,   rates.food,   maint.food,   rates.food - maint.food],
+            [RESOURCE_ICONS.water,  rates.water,  maint.water,  rates.water - maint.water],
+            [RESOURCE_ICONS.metals, rates.metals, 0,            rates.metals],
+            [RESOURCE_ICONS.fuel,   rates.fuel,   maint.fuel,   rates.fuel - maint.fuel],
+        ];
+        econHTML = `<div class="tp-net-header">
+  <span></span><span class="tp-net-head">Prod</span><span class="tp-net-head">Maint</span><span class="tp-net-head">Net</span>
+</div>
+${rows.map(([icon, prod, m, net]) => {
+    const nc = net >= 0 ? 'tp-pos' : 'tp-neg';
+    return `<div class="tp-net-row">
+  <span class="tp-net-icon">${icon}</span>
+  <span class="tp-net-val tp-pos">+${prod}</span>
+  <span class="tp-net-val tp-neg">\u2212${m}</span>
+  <span class="tp-net-val ${nc}">${net >= 0 ? '+' : ''}${net}</span>
+</div>`;
+}).join('')}`;
+    }
+
+    return `${locationStrip}
+<div class="cv-header">
+  <span class="cv-name" id="cv-name" contenteditable="false" spellcheck="false">${htmlEsc(colony.name)}</span>
+  <button class="cv-close-btn" id="cv-close-btn">&times;</button>
+</div>
+<div class="cv-tier-line">${TIER_LABELS[tier.name] ?? tier.name} &middot; Pop. ${pop} / ${housingCap >= 1e6 ? (housingCap / 1e6).toFixed(1) + 'M' : housingCap >= 1e3 ? Math.round(housingCap / 1e3) + 'K' : housingCap}</div>
+${starvHTML}${econHTML}
+${buildBuildingsHTML(colony, pool)}`;
+}
+
+/**
+ * Update the colony resource bottom strip DOM elements directly (no full re-render).
+ * Called each HUD tick and after any transaction.
+ */
+function updateColonyBottomStrip() {
+    const bodyId  = state.activeBodyId || 'standalone';
+    const pool    = state.bodyPools[bodyId];
+    if (!pool) return;
+    const poolMax = window._calcBodyPoolMax?.(bodyId) ?? 500;
+
+    // Sum net rates across all colonies for this body
+    const net = { food: 0, water: 0, metals: 0, fuel: 0 };
+    state.colonies.filter(c => c.bodyId === bodyId).forEach(c => {
+        const d    = (state.currentSystem && state.generatedBodies)
+            ? state.generatedBodies.get(c.bodyId)?.curData ?? null
+            : state.curData;
+        const prod = colonyProductionRates(c, d);
+        const maint = maintenanceCost(c);
+        net.food   += prod.food   - maint.food;
+        net.water  += prod.water  - maint.water;
+        net.metals += prod.metals - maint.metals;
+        net.fuel   += prod.fuel   - maint.fuel;
+    });
+
+    const RESOURCE_BAR_COLORS = { food: '#82d962', water: '#4499ee', metals: '#aaaacc', fuel: '#ee8833' };
+    RESOURCE_TYPES.forEach(key => {
+        const val    = pool[key] ?? 0;
+        const pct    = Math.min(100, Math.round(val / poolMax * 100));
+        const netVal = Math.round(net[key]);
+        const barEl  = document.getElementById(`cbs-bar-${key}`);
+        const valEl  = document.getElementById(`cbs-val-${key}`);
+        const netEl  = document.getElementById(`cbs-net-${key}`);
+        if (barEl) { barEl.style.width = pct + '%'; barEl.style.backgroundColor = RESOURCE_BAR_COLORS[key]; }
+        if (valEl) valEl.textContent = val + ' / ' + poolMax;
+        if (netEl) {
+            netEl.textContent  = (netVal >= 0 ? '+' : '') + netVal + '/tick';
+            netEl.className    = 'cbs-net ' + (netVal > 0 ? 'positive' : netVal < 0 ? 'negative' : 'zero');
+        }
+    });
 }
 
 /** Build the inner HTML for the tile detail panel. */
@@ -433,37 +796,93 @@ function setupPanelDrag(panel) {
 
 /** Wire the colony founding input + button inside the panel's colony section. */
 function wireColonyHandlers(panel, region) {
+    const d      = state.curData;
+    const bodyId = state.activeBodyId || 'standalone';
+
+    // --- Wire building upgrade buttons (present whenever a colony exists) ---
+    panel.querySelectorAll('.tp-bld-upgrade-btn[data-bld-cat]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const cat    = btn.dataset.bldCat;
+            const pool   = state.bodyPools[bodyId];
+            const colony = state.colonies.find(c => c.bodyId === bodyId && c.region === region);
+            if (!colony || !pool) return;
+            const nextLevel = (colony.buildings[cat] ?? 0) + 1;
+            const cost      = BUILDING_COSTS[cat]?.[nextLevel];
+            if (cost == null || pool.metals < cost) return;
+            pool.metals -= cost;
+            colony.buildings[cat] = nextLevel;
+            window._refreshHUD?.();
+            const colSec = panel.querySelector('.tp-colony-sec');
+            if (colSec) colSec.innerHTML = '<div class="tp-sectitle">COLONY</div>' + buildColonySectionHTML(region);
+            wireColonyHandlers(panel, region);
+        });
+    });
+
+    // --- Wire tier-advance button ---
+    panel.querySelector('.tp-tier-advance-btn[data-tier-advance]')?.addEventListener('click', () => {
+        const pool   = state.bodyPools[bodyId];
+        const colony = state.colonies.find(c => c.bodyId === bodyId && c.region === region);
+        if (!colony || !pool) return;
+        const cost = TIER_ADVANCE_COSTS[colony.tier];
+        if (cost == null || pool.metals < cost) return;
+        pool.metals -= cost;
+        const idx = COLONY_TIER_ORDER.indexOf(colony.tier);
+        if (idx >= 0 && idx < COLONY_TIER_ORDER.length - 1) colony.tier = COLONY_TIER_ORDER[idx + 1];
+        window._refreshHUD?.();
+        const colSec = panel.querySelector('.tp-colony-sec');
+        if (colSec) colSec.innerHTML = '<div class="tp-sectitle">COLONY</div>' + buildColonySectionHTML(region);
+        wireColonyHandlers(panel, region);
+    });
+
+    // --- Wire founding form (only present before a colony exists) ---
     const nameInput = panel.querySelector('#tp-colony-name');
     const foundBtn  = panel.querySelector('#tp-found-btn');
     if (!nameInput || !foundBtn) return;
+    const hab    = d?.debugLayers?.habitability?.[region] ?? 0.5;
+    const cost   = foundingCost(hab);
 
     const updateBtn = () => {
-        const enabled = nameInput.value.trim().length > 0;
+        // Lazy-init the body pool on first look if no colonies exist yet for this body
+        if (!state.bodyPools[bodyId] && !state.colonies.some(c => c.bodyId === bodyId)) {
+            state.bodyPools[bodyId] = { ...STARTING_POOL };
+        }
+        const pool      = state.bodyPools[bodyId];
+        const hasName   = nameInput.value.trim().length > 0;
+        const affordable = canAfford(cost, pool);
+        const enabled   = hasName && affordable;
         foundBtn.disabled = !enabled;
         foundBtn.classList.toggle('enabled', enabled);
     };
     nameInput.addEventListener('input', updateBtn);
+    updateBtn();
 
     foundBtn.addEventListener('click', () => {
         const name = nameInput.value.trim();
         if (!name) return;
-        const d  = state.curData;
-        const rx = d.r_xyz[region * 3], ry = d.r_xyz[region * 3 + 1], rz = d.r_xyz[region * 3 + 2];
+        const pool = state.bodyPools[bodyId];
+        if (!pool || !canAfford(cost, pool)) return;
+
+        // Deduct founding cost from the body pool
+        RESOURCE_TYPES.forEach(t => { pool[t] -= cost[t]; });
+
+        const rx  = d.r_xyz[region * 3], ry = d.r_xyz[region * 3 + 1], rz = d.r_xyz[region * 3 + 2];
         const lat = Math.asin(Math.max(-1, Math.min(1, ry))) * (180 / Math.PI);
         const lon = Math.atan2(rx, rz) * (180 / Math.PI);
-        const bodyId   = state.activeBodyId || 'standalone';
         const systemId = state.currentSystemId || null;
-        state.colonies.push(createColony({ bodyId, systemId, region, lat, lon, name, gameDays: getGameDays() }));
+        state.colonies.push(createColony({ bodyId, systemId, region, lat, lon, name, gameDays: getGameDays(), habitability: hab }));
         drawColonyMarkers(state.colonies, bodyId);
         updateMapColonyMarkers(state.colonies, bodyId, state.mapCenterLon || 0);
         window._refreshHUD?.();
-        // Re-render colony section in-place (shows info view now that colony exists)
+        // Re-render colony section in-place
         const colSec = panel.querySelector('.tp-colony-sec');
         if (colSec) {
             colSec.innerHTML = '<div class="tp-sectitle">COLONY</div>' + buildColonySectionHTML(region);
         }
     });
 }
+
+// Expose buildColonySectionHTML for tile panel live-refresh from main.js HUD path
+window._editModeHelpers = { buildColonySectionHTML };
 
 /** Show the tile detail panel near (cx, cy) and highlight the clicked region. */
 function showTilePanel(region, cx, cy) {
@@ -512,11 +931,202 @@ export function hideTilePanel() {
     if (panel) panel.style.display = 'none';
 }
 
-/**
- * Open the tile panel for the given region, anchored at the horizontal centre
- * of the screen. Intended for programmatic navigation (e.g. clicking a colony
- * row in the settlement panel) where there is no pointer event to derive cx/cy.
- */
+// ── Colony view ─────────────────────────────────────────────────────────────
+
+/** Enter the dedicated colony management view for the given tile region. */
+export function enterColonyView(region) {
+    if (region === state.colonyViewRegion) return; // already viewing
+
+    state.colonyViewRegion = region;
+
+    // Hide the floating tile panel if open
+    hideTilePanel();
+
+    // Switch sidebar panel: hide World panel, show Colony panel
+    const navRow      = document.getElementById('navRow');
+    const panelWorld  = document.getElementById('panelWorld');
+    const panelColony = document.getElementById('panelColony');
+    if (navRow)      navRow.style.display = 'none';
+    if (panelWorld)  panelWorld.classList.remove('active');
+    if (panelColony) panelColony.classList.add('active');
+
+    // Ensure sidebar is expanded
+    const uiPanel = document.getElementById('ui');
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    if (uiPanel) uiPanel.classList.remove('collapsed');
+    if (sidebarToggle) { sidebarToggle.innerHTML = '\u00ab'; sidebarToggle.title = 'Collapse panel'; }
+
+    // Hide the settlement list (colony panel is the new hub)
+    const settlementPanel = document.getElementById('settlementPanel');
+    if (settlementPanel) settlementPanel.classList.add('hidden');
+
+    // Highlight the selected tile
+    state.selectedRegion = region;
+    updateSelectionHighlight(region);
+
+    // Render panel content + bottom strip
+    _renderColonyPanel(region);
+
+    // Show bottom strip and shift viz widget
+    const strip = document.getElementById('colonyBottomStrip');
+    if (strip) strip.classList.remove('hidden');
+    document.body.classList.add('colony-view-active');
+    updateColonyBottomStrip();
+}
+
+/** Exit the colony view and restore the normal sidebar. */
+export function exitColonyView() {
+    if (state.colonyViewRegion === null) return;
+
+    state.colonyViewRegion = null;
+
+    // Restore sidebar
+    const navRow      = document.getElementById('navRow');
+    const panelWorld  = document.getElementById('panelWorld');
+    const panelColony = document.getElementById('panelColony');
+    if (navRow)      navRow.style.display = '';
+    if (panelWorld)  panelWorld.classList.add('active');
+    if (panelColony) { panelColony.classList.remove('active'); panelColony.innerHTML = ''; }
+
+    // Restore settlement panel if colonies exist for this body
+    const bodyId = state.activeBodyId || 'standalone';
+    const settlementPanel = document.getElementById('settlementPanel');
+    if (settlementPanel && state.colonies.some(c => c.bodyId === bodyId)) {
+        settlementPanel.classList.remove('hidden');
+    }
+
+    // Hide bottom strip
+    const strip = document.getElementById('colonyBottomStrip');
+    if (strip) strip.classList.add('hidden');
+    document.body.classList.remove('colony-view-active');
+
+    // Clear tile highlight
+    clearSelectionHighlight();
+    state.selectedRegion = null;
+}
+
+/** Re-render the colony panel in-place (called after every data-changing action). */
+function refreshColonyPanel() {
+    const region = state.colonyViewRegion;
+    if (region === null) return;
+    _renderColonyPanel(region);
+    updateColonyBottomStrip();
+}
+
+/** Internal: inject HTML into #panelColony and wire handlers. */
+function _renderColonyPanel(region) {
+    const panelColony = document.getElementById('panelColony');
+    if (!panelColony) return;
+    panelColony.innerHTML = buildColonyPanelHTML(region);
+    wireColonyPanelHandlers(region);
+}
+
+// expose for main.js HUD tick
+window._refreshColonyPanel = refreshColonyPanel;
+window._updateColonyBottomStrip = updateColonyBottomStrip;
+
+/** Wire all interactive elements inside #panelColony. */
+function wireColonyPanelHandlers(region) {
+    const panel  = document.getElementById('panelColony');
+    if (!panel) return;
+    const bodyId = state.activeBodyId || 'standalone';
+
+    // Close button
+    panel.querySelector('#cv-close-btn')?.addEventListener('click', exitColonyView);
+
+    // Editable colony name
+    const nameEl = panel.querySelector('#cv-name');
+    if (nameEl) {
+        nameEl.addEventListener('click', () => {
+            nameEl.contentEditable = 'true';
+            nameEl.focus();
+            // Select all text
+            const range = document.createRange(); range.selectNodeContents(nameEl);
+            const sel   = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+        });
+        const commitName = () => {
+            nameEl.contentEditable = 'false';
+            const colony = state.colonies.find(c => c.bodyId === bodyId && c.region === region);
+            if (!colony) return;
+            const newName = nameEl.textContent.trim();
+            if (newName) { colony.name = newName; }
+            else { nameEl.textContent = colony.name; } // revert empty
+        };
+        nameEl.addEventListener('blur', commitName);
+        nameEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); nameEl.blur(); } });
+    }
+
+    // Founding button (shown when no colony exists yet)
+    const foundNameInput = panel.querySelector('#cv-found-name');
+    const foundBtn       = panel.querySelector('#cv-found-btn');
+    if (foundNameInput && foundBtn) {
+        const updateFoundBtn = () => {
+            if (!state.bodyPools[bodyId] && !state.colonies.some(c => c.bodyId === bodyId)) {
+                state.bodyPools[bodyId] = { ...STARTING_POOL };
+            }
+            const pool    = state.bodyPools[bodyId];
+            const d       = state.curData;
+            const hab     = Math.max(0, Math.min(1, d?.debugLayers?.habitability?.[region] ?? 0.5));
+            const cost    = foundingCost(hab);
+            const enabled = foundNameInput.value.trim().length > 0 && canAfford(cost, pool);
+            foundBtn.disabled = !enabled;
+            foundBtn.classList.toggle('enabled', enabled);
+        };
+        foundNameInput.addEventListener('input', updateFoundBtn);
+        foundBtn.addEventListener('click', () => {
+            const name = foundNameInput.value.trim();
+            if (!name) return;
+            const pool = state.bodyPools[bodyId];
+            const d    = state.curData;
+            if (!pool || !d) return;
+            const hab  = Math.max(0, Math.min(1, d.debugLayers?.habitability?.[region] ?? 0.5));
+            const cost = foundingCost(hab);
+            if (!canAfford(cost, pool)) return;
+            RESOURCE_TYPES.forEach(t => { pool[t] -= cost[t]; });
+            const rx  = d.r_xyz[region * 3], ry = d.r_xyz[region * 3 + 1], rz = d.r_xyz[region * 3 + 2];
+            const lat = Math.asin(Math.max(-1, Math.min(1, ry))) * (180 / Math.PI);
+            const lon = Math.atan2(rx, rz) * (180 / Math.PI);
+            state.colonies.push(createColony({ bodyId, systemId: state.currentSystemId || null,
+                region, lat, lon, name, gameDays: getGameDays(), habitability: hab }));
+            drawColonyMarkers(state.colonies, bodyId);
+            updateMapColonyMarkers(state.colonies, bodyId, state.mapCenterLon || 0);
+            window._refreshHUD?.();
+            refreshColonyPanel();
+        });
+    }
+
+    // Building upgrade buttons
+    panel.querySelectorAll('.tp-bld-upgrade-btn[data-bld-cat]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const cat    = btn.dataset.bldCat;
+            const pool   = state.bodyPools[bodyId];
+            const colony = state.colonies.find(c => c.bodyId === bodyId && c.region === region);
+            if (!colony || !pool) return;
+            const nextLevel = (colony.buildings[cat] ?? 0) + 1;
+            const cost      = BUILDING_COSTS[cat]?.[nextLevel];
+            if (cost == null || pool.metals < cost) return;
+            pool.metals -= cost;
+            colony.buildings[cat] = nextLevel;
+            window._refreshHUD?.();
+            refreshColonyPanel();
+        });
+    });
+
+    // Tier advance button
+    panel.querySelector('.tp-tier-advance-btn[data-tier-advance]')?.addEventListener('click', () => {
+        const pool   = state.bodyPools[bodyId];
+        const colony = state.colonies.find(c => c.bodyId === bodyId && c.region === region);
+        if (!colony || !pool) return;
+        const cost = TIER_ADVANCE_COSTS[colony.tier];
+        if (cost == null || pool.metals < cost) return;
+        pool.metals -= cost;
+        const idx = COLONY_TIER_ORDER.indexOf(colony.tier);
+        if (idx >= 0 && idx < COLONY_TIER_ORDER.length - 1) colony.tier = COLONY_TIER_ORDER[idx + 1];
+        window._refreshHUD?.();
+        refreshColonyPanel();
+    });
+}
+
 export function showTilePanelCentered(region) {
     showTilePanel(region, window.innerWidth * 0.5, window.innerHeight * 0.45);
 }
@@ -568,9 +1178,19 @@ export function setupEditMode() {
                 }
                 const hit = getHitInfo(e);
                 if (hit) {
-                    showTilePanel(hit.region, e.clientX, e.clientY);
+                    const bodyId       = state.activeBodyId || 'standalone';
+                    const hasColony    = state.colonies.some(c => c.bodyId === bodyId && c.region === hit.region);
+                    if (hasColony) {
+                        // Route to dedicated colony view
+                        enterColonyView(hit.region);
+                    } else {
+                        // Exit colony view if we clicked a non-colony tile
+                        if (state.colonyViewRegion !== null) exitColonyView();
+                        showTilePanel(hit.region, e.clientX, e.clientY);
+                    }
                 } else {
                     hideTilePanel();
+                    if (state.colonyViewRegion !== null) exitColonyView();
                 }
             }
         }
@@ -671,6 +1291,12 @@ export function setupEditMode() {
 
     // Close tile panel when clicking outside it (sidebar, buttons, empty canvas space)
     document.addEventListener('pointerdown', (e) => {
+        // Don't close if interacting with the colony panel or bottom strip
+        const colonyPanel = document.getElementById('panelColony');
+        const colonyStrip = document.getElementById('colonyBottomStrip');
+        if (colonyPanel?.contains(e.target) || colonyStrip?.contains(e.target)) return;
+        // Don't close tile panel if colony view is active (that's handled by enterColonyView/exitColonyView)
+        if (state.colonyViewRegion !== null) return;
         if (state.selectedRegion === null) return;
         const panel = document.getElementById('tilePanel');
         if (panel && !panel.contains(e.target)) hideTilePanel();
