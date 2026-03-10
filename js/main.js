@@ -7,12 +7,14 @@ import { renderer, scene, camera, ctrl, waterMesh, atmosMesh, starsMesh,
          updateAtmosphereColor, updateWaterColor, updateHazeLayer,
          orreryCamera, orreryCtrl, tickOrreryZoom, updateOrreryCameraFrustum,
          tickMoonOrbits, updateMoonLabels,
-         startBodyTransition, tickBodyTransition } from './render/scene.js';
+         startBodyTransition, tickBodyTransition,
+         flyToSurfacePoint, tickFlyTo,
+         colonyGlobeGroup, colonyMapGroup } from './render/scene.js';
 import { state } from './core/state.js';
 import { generate, reapplyViaWorker, computePlanetaryDebugLayers } from './generate.js';
 import { encodePlanetCode, decodePlanetCode } from './world/planet-code.js';
-import { buildMesh, updateMeshColors, buildMapMesh, rebuildGrids, buildWindArrows, buildOceanCurrentArrows, clearSelectionHighlight } from './render/planet-mesh.js';
-import { setupEditMode, hideTilePanel } from './edit-mode.js';
+import { buildMesh, updateMeshColors, buildMapMesh, rebuildGrids, buildWindArrows, buildOceanCurrentArrows, clearSelectionHighlight, drawColonyMarkers, clearColonyMarkers, updateMapColonyMarkers } from './render/planet-mesh.js';
+import { setupEditMode, hideTilePanel, showTilePanelCentered } from './edit-mode.js';
 import { detailFromSlider, sliderFromDetail } from './core/detail-scale.js';
 import { setUpliftMult, setHasLiquidOcean,
          setBaseTemp, setAtmosphere, setHydrosphere } from './render/color-map.js';
@@ -24,6 +26,8 @@ import { CLIMATE_LAYERS, switchVisualization, syncTabsToLayer, updateLegend, onP
 import { WORLD_PRESETS, applyPreset, updatePlanetWarnings } from './ui/world-preset.js';
 import { initExportModal } from './ui/export-modal.js';
 import { initTutorial, initSurveyTracker } from './ui/modals.js';
+import { getGameDays, tickClock } from './game-clock.js';
+import { colonyProductionRates } from './colony.js';
 
 state.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 
@@ -226,6 +230,15 @@ genBtn.addEventListener('generate-done', () => {
     if (state.isBgGenerating) return;
     hideTilePanel();
     clearSelectionHighlight();
+    // Clear colonies for the active body — region indices change with each full generation
+    if (!state.currentSystem) {
+        state.colonies = state.colonies.filter(c => c.bodyId !== 'standalone');
+    } else {
+        const bodyId = state.activeBodyId;
+        if (bodyId) state.colonies = state.colonies.filter(c => c.bodyId !== bodyId);
+    }
+    clearColonyMarkers();
+    updateHUD();
 });
 genBtn.addEventListener('generate-done', () => {
     const infoEl = document.getElementById('info');
@@ -799,6 +812,115 @@ function switchPanel(kind) {
 // ═══════════════════════════════════════════════════════════════════════════
 initSolarSystem({ onProgress, shouldSkipClimate, switchPanel, showBuildOverlay });
 
+// Colony economy & HUD
+// ═══════════════════════════════════════════════════════════════════════════
+function updateHUD() {
+    const panel = document.getElementById('settlementPanel');
+    if (!panel) return;
+    const bodyId   = state.activeBodyId || 'standalone';
+    const bodyCols = state.colonies.filter(c => c.bodyId === bodyId);
+
+    if (state.solarSystemMode || !bodyCols.length) {
+        panel.classList.add('hidden');
+        return;
+    }
+    panel.classList.remove('hidden');
+
+    // Totals
+    let food = 0, water = 0, metals = 0, fuel = 0;
+    for (const c of bodyCols) {
+        food   += c.stockpile.food;
+        water  += c.stockpile.water;
+        metals += c.stockpile.metals;
+        fuel   += c.stockpile.fuel;
+    }
+    const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M'
+                   : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K'
+                   : n.toLocaleString();
+
+    // Per-colony rows
+    const colonyRows = bodyCols.map(c => {
+        const rates = colonyProductionRates(c, state.curData);
+        const { getTier: _gt } = window._colonyHelpers || {};
+        // derive tier label from population
+        const TIERS = [
+            { max: 99, name: 'Outpost' }, { max: 9999, name: 'Settlement' },
+            { max: 999999, name: 'Colony' }, { max: 99999999, name: 'City' },
+            { max: Infinity, name: 'Megacity' },
+        ];
+        const tier = TIERS.find(t => c.population <= t.max)?.name ?? 'Colony';
+        const pop  = c.population >= 1e6 ? (c.population / 1e6).toFixed(2) + 'M'
+                   : c.population >= 1e3 ? Math.round(c.population / 1e3) + 'K'
+                   : c.population.toLocaleString();
+        return `<div class="sp-colony" data-region="${c.region}">
+  <div>
+    <div class="sp-col-name">${c.name.replace(/</g, '&lt;')}</div>
+    <div class="sp-col-tier">${tier}</div>
+    <div class="sp-col-rates">
+      <span class="sp-rate">🌾<span>${fmt(rates.food)}</span></span>
+      <span class="sp-rate">💧<span>${fmt(rates.water)}</span></span>
+      <span class="sp-rate">⛏<span>${fmt(rates.metals)}</span></span>
+      <span class="sp-rate">⚡<span>${fmt(rates.fuel)}</span></span>
+    </div>
+  </div>
+  <div class="sp-col-pop">${pop}</div>
+</div>`;
+    }).join('');
+
+    panel.innerHTML = `
+<div class="sp-header">
+  <span>Settlements &mdash; ${bodyCols.length}</span>
+</div>
+<div class="sp-total-row">
+  <span class="sp-total-item">🌾 <span class="sp-total-val">${fmt(food)}</span></span>
+  <span class="sp-total-item">💧 <span class="sp-total-val">${fmt(water)}</span></span>
+  <span class="sp-total-item">⛏ <span class="sp-total-val">${fmt(metals)}</span></span>
+  <span class="sp-total-item">⚡ <span class="sp-total-val">${fmt(fuel)}</span></span>
+</div>
+<div class="sp-list">${colonyRows}</div>`;
+
+    // Wire click-to-focus: clicking a colony row flies the camera to that tile
+    // and opens its tile panel.
+    panel.querySelectorAll('.sp-colony').forEach(row => {
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', () => {
+            const region = parseInt(row.dataset.region, 10);
+            if (isNaN(region) || !state.curData) return;
+            // Compute world-space direction of the region, accounting for planet rotation.
+            const d = state.curData;
+            const lx = d.r_xyz[region * 3], ly = d.r_xyz[region * 3 + 1], lz = d.r_xyz[region * 3 + 2];
+            const ry = state.planetMesh?.rotation.y ?? 0;
+            const c = Math.cos(ry), s = Math.sin(ry);
+            const wx = lx * c + lz * s, wy = ly, wz = -lx * s + lz * c;
+            flyToSurfacePoint(wx, wy, wz, 2.2);
+            // Small delay so the camera is already moving before the panel opens.
+            setTimeout(() => showTilePanelCentered(region), 80);
+        });
+    });
+}
+window._refreshHUD = updateHUD;
+
+function tickEconomy(gameDays) {
+    if (!state.colonies.length) return;
+    if (gameDays - state.lastEconomyTickDays < 30) return;
+    state.lastEconomyTickDays = gameDays;
+    for (const colony of state.colonies) {
+        let cd = null;
+        if (state.currentSystem && state.generatedBodies) {
+            cd = state.generatedBodies.get(colony.bodyId)?.curData ?? null;
+        } else {
+            cd = state.curData;
+        }
+        const rates = colonyProductionRates(colony, cd);
+        colony.stockpile.food   += rates.food;
+        colony.stockpile.water  += rates.water;
+        colony.stockpile.metals += rates.metals;
+        colony.stockpile.fuel   += rates.fuel;
+        colony.population = Math.round(colony.population * 1.005 + 5);
+    }
+    updateHUD();
+}
+
 // Animation loop
 // ═══════════════════════════════════════════════════════════════════════════
 let _lastFrameTime = performance.now();
@@ -823,17 +945,29 @@ function animate() {
         if (state.arrowGroup) state.arrowGroup.visible = false;
         if (state.windArrowGroup) state.windArrowGroup.visible = false;
         if (state.mapMesh) state.mapMesh.visible = false;
+        colonyGlobeGroup.visible = false;
+        colonyMapGroup.visible   = false;
 
         tickOrreryZoom();
         orreryCtrl.update();
         if (window._solarSystemTickFrame) window._solarSystemTickFrame(realDtSec);
+        tickEconomy(getGameDays());
         renderer.render(scene, orreryCamera);
     } else if (state.mapMode) {
+        colonyGlobeGroup.visible = false;
+        colonyMapGroup.visible   = true;
+        tickClock(realDtSec);
+        tickEconomy(getGameDays());
         tickMapZoom(); mapCtrl.update();
         renderer.render(scene, mapCamera);
     } else {
+        colonyGlobeGroup.visible = true;
+        colonyMapGroup.visible   = false;
+        tickClock(realDtSec);
+        tickEconomy(getGameDays());
         const _inBodyTransition = tickBodyTransition(realDtSec);
-        if (!_inBodyTransition) { tickZoom(); ctrl.update(); }
+        const _inFlyTo = !_inBodyTransition && tickFlyTo(realDtSec);
+        if (!_inBodyTransition && !_inFlyTo) { tickZoom(); ctrl.update(); }
         tickMoonOrbits(realDtSec);
         updateMoonLabels();
         if (state.planetMesh && document.getElementById('chkRotate').checked) {
@@ -844,6 +978,7 @@ function animate() {
             if (state.windArrowGroup) state.windArrowGroup.rotation.y = state.planetMesh.rotation.y;
             if (state.oceanCurrentArrowGroup) state.oceanCurrentArrowGroup.rotation.y = state.planetMesh.rotation.y;
             if (state.globeGridMesh) state.globeGridMesh.rotation.y = state.planetMesh.rotation.y;
+            colonyGlobeGroup.rotation.y = state.planetMesh.rotation.y;
         }
         renderer.render(scene, camera);
     }

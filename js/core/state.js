@@ -35,6 +35,13 @@ export const state = {
     // Currently selected world preset name ('earth', 'mars', 'venus', … or 'custom').
     currentPreset: 'custom',
 
+    // ── Colony system ────────────────────────────────────────────────────────
+    // Flat array of colony objects created by createColony() in js/colony.js.
+    // In-session only (cleared on page reload alongside terrain data).
+    colonies: [],
+    // Game-clock day count at the last economy tick (used to throttle 30-day cycles).
+    lastEconomyTickDays: 0,
+
     // ── Solar System mode ────────────────────────────────────────────────────
     // true when the orrery view is active (planet globe is hidden)
     solarSystemMode: false,

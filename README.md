@@ -29,13 +29,14 @@ All three are considered together; ties are broken in the order above.
 - **Coastal roughening** — fractal noise with active/passive margin differentiation, domain warping for bays/headlands, and offshore island scattering
 - **3D globe rendering** with atmosphere rim shader, atmospheric haze sphere (full-disc opacity layer driven by atmosphere level — Thin = faint haze, Thick = orange-tan, Crushing = near-opaque cream, Titan-cold = deep orange haze blanket), translucent water sphere, terrain displacement, and starfield
 - **Equirectangular map projection** with antimeridian wrapping
-- **Interactive editing** — Ctrl-click any plate to toggle between land and ocean, with live elevation recomputation. Left-click any tile to open the **Tile Detail Panel** — a floating, draggable card showing full terrain data (elevation, plate, coordinates), all climate fields (temperature, precipitation, wind direction and speed, ocean current warmth for ocean tiles, habitability index, hydrosphere state), biome name and Köppen code with color swatch, and a **Found Settlement** stub button. Dismiss by clicking the × button or clicking anywhere outside the panel. The selected tile glows gold on both globe and map views until dismissed.
+- **Interactive editing** — Ctrl-click any plate to toggle between land and ocean, with live elevation recomputation. Left-click any tile to open the **Tile Detail Panel** — a floating, draggable card showing full terrain data (elevation, plate, coordinates), all climate fields (temperature, precipitation, wind direction and speed, ocean current warmth for ocean tiles, habitability index, hydrosphere state), biome name and Köppen code with color swatch, resource potential bars (food, water, metals, fuel — requires climate), and the colony panel (found a new settlement or view an existing one's production rates and stockpile). Dismiss by clicking the × button or clicking anywhere outside the panel. The selected tile glows gold on both globe and map views until dismissed.
 - **Seasonal wind simulation** — pressure-driven wind patterns with a longitude-varying ITCZ that tracks the thermal equator (~5° over ocean, up to 15-20° over continents), Gaussian pressure bands (subtropical highs, subpolar lows, polar highs), land/sea thermal contrast for monsoon-like pressure reversals, elevation barometric effects, and Coriolis-deflected geostrophic wind with natural cross-equatorial flow reversal. Computed for both summer and winter seasons.
 - **Ocean surface currents** — rule-based geographic gyre simulation driven by wind belts (trade winds, westerlies, polar easterlies) with a longitude-varying ITCZ equatorial countercurrent. Continental shelves are classified as western or eastern boundaries via coast-normal BFS, producing subtropical gyres (CW in NH, CCW in SH) with western boundary intensification (Gulf Stream, Kuroshio effect) and weaker eastern boundary return flow. Detects circumpolar channels for unobstructed eastward currents (Antarctic Circumpolar Current). Currents are colored by heat transport: red = warm poleward flow, blue = cold equatorward flow, black = zonal (neutral). Computed for both summer and winter seasons.
 - **Precipitation** — blended dual-model approach: a complex moisture advection simulation is combined 50-50 with a fast heuristic zonal model. The advection model simulates wind-driven moisture transport from coasts with six mechanisms: ITCZ convective uplift, frontal convergence, orographic rain/shadow, lee cyclogenesis, polar-front precipitation, and subtropical high suppression. The heuristic model provides smooth latitude-based patterns (ITCZ wet belt, subtropical dry belt, mid-latitude recovery, polar dryness) modulated by continentality and orographic effects. Blending the two reduces splotchiness while preserving terrain-informed detail and strengthening subtropical desert formation (~20–35°). Visualized on a brown (dry) → green (moderate) → blue (wet) color ramp. Computed for both summer and winter seasons.
 - **Map type switcher** — first-class Terrain / Satellite / Climate / Heightmap / Land HM tabs with color legends for each view
 - **On-demand climate** — optional deferred climate computation; skip climate during generation for faster terrain iteration, compute it on demand when needed
-- **Detailed visualization** — twenty-eight selectable inspection layers organized by category (Geology, Atmosphere, Ocean, Climate, Planetary, Elevation) for viewing each component in isolation. Wind/pressure layers show directional wind arrows, ocean current layers show current arrows colored by heat transport, on both globe and map views. Precipitation layers use a brown→green→blue ramp showing dry to wet regions.
+- **Detailed visualization** — thirty-two selectable inspection layers organized by category (Geology, Atmosphere, Ocean, Climate, Planetary, Elevation, Resources) for viewing each component in isolation. Wind/pressure layers show directional wind arrows, ocean current layers show current arrows colored by heat transport, on both globe and map views. Precipitation layers use a brown→green→blue ramp showing dry to wet regions.
+- **Colony system** — found settlements on planetary tiles from the tile detail panel. Each colony generates food, water, metals, and fuel each economy tick (every 30 game days) at rates derived from its tile's resource potential. Colonies level up through five tiers (Outpost → Settlement → Colony → City → Megacity) as population grows. A floating **Settlement Panel** in the top-right lists all active settlements with per-tick production rates and total stockpile; clicking a row flies the camera to that tile and opens its tile panel.
 - **Map export** — download high-resolution equirectangular PNGs (color terrain, satellite biome, climate/Köppen, B&W heightmap, land-only heightmap, or B&W land mask) at configurable widths up to 65536px with tiled rendering. **Export All** downloads Satellite, Climate, Heightmap, and Land Mask in one click, auto-computing climate if needed.
 
 ### Solar System Mode
@@ -158,6 +159,7 @@ The **Inspect** dropdown (in Visual Options, below the map tabs) selects a detai
 - **Climate** — Precipitation Summer/Winter (brown = dry, green = moderate, blue = wet), Rain Shadow Summer/Winter (diverging blue = windward orographic boost, gray = neutral, red-brown = leeward rain shadow; leeward effects are seeded at downslope faces scaled by mountain height, then propagated ~1500 km downwind to show extended shadow zones like the foehn drying effect), Temperature Summer/Winter (purple-blue = cold, white = 0 C, green-yellow = warm, red = hot; range adapts to the planet's actual temperature extremes), Continentality (blue = ocean, green = coast, yellow = moderate interior, orange/red = deep continental interior)
 - **Planetary** — Hydrosphere State (blue = liquid ocean, white = frozen, tan = dry basin, grey = land; reflects the planet's `Hydrosphere` and `Base Temp` settings), Habitability Index (red = inhospitable, yellow = marginal, green = habitable; composite of liquid water presence, temperature in −20 to +60 °C, and precipitation)
 - **Elevation** — Full Heightmap (full-range B&W)
+- **Resources** — Food Potential (brown = barren → green = fertile; driven by temperature bell-curve, precipitation, elevation, and atmosphere level), Water Potential (tan = dry → blue = abundant; ocean tiles full, land tiles track precipitation and ice bonuses), Metal Deposits (black = none → silver = rich vein; driven by tectonic stress at convergent boundaries, scaled by world gravity), Fuel Potential (dark = none → amber = rich; blends biotic fossil-fuel signal with geothermal/volcanic heat; thick-atmosphere worlds gain a hydrocarbon bonus). All four layers require climate to have been computed.
 
 ### Export
 
@@ -210,7 +212,22 @@ Navigation hints are shown in the sidebar panel and as a contextual tooltip when
 | Open tile detail panel | Left-click a tile | — |
 | Reshape continents | Ctrl-click a plate | Tap the edit button (pencil), then tap a plate |
 
-Hovering over a region shows a quick info card with plate type, elevation, coordinates, and (when climate has been computed) temperature, precipitation, and Köppen classification. **Left-clicking** any tile opens a persistent floating **Tile Detail Panel** near the click point, showing the full terrain profile, all climate fields (temperature, precipitation, wind direction and Beaufort class, ocean current warmth for ocean tiles, habitability index, hydrosphere state), biome name, and a **Found Settlement** stub button for the Heliosphere colony system. The panel is **draggable** — drag the header to reposition it freely. Dismiss by clicking the × button or clicking anywhere outside the panel (sidebar, canvas, buttons). The clicked tile is highlighted in gold on both globe and map until the panel is closed.
+Hovering over a region shows a quick info card with plate type, elevation, coordinates, and (when climate has been computed) temperature, precipitation, and Köppen classification. **Left-clicking** any tile opens a persistent floating **Tile Detail Panel** near the click point, showing the full terrain profile, all climate fields (temperature, precipitation, wind direction and Beaufort class, ocean current warmth for ocean tiles, habitability index, hydrosphere state), biome name, resource potential bars (food, water, metals, fuel — shown when climate has been computed), and the colony section (name input + **Found Here** button, or existing settlement info with per-resource production rates and stockpiles). The panel is **draggable** — drag the header to reposition it freely. Dismiss by clicking the × button or clicking anywhere outside the panel (sidebar, canvas, buttons). The clicked tile is highlighted in gold on both globe and map until the panel is closed.
+
+### Colony System
+
+Found settlements on planetary tiles from the tile detail panel (requires climate to be computed). Each settlement generates four resources every 30 game days:
+
+| Resource | Symbol | Generation formula |
+|----------|--------|-------------------|
+| Food | 🌾 | Temperature bell-curve (peak 22 °C) × precipitation × elevation × atmosphere level |
+| Water | 💧 | Ocean tiles: full (liquid) or 50 % (ice) or near-zero (dry basin); land tiles: precipitation + ice bonus |
+| Metals | ⛏ | Tectonic stress at convergent-plate boundaries × gravity scaling × spatial cluster noise |
+| Fuel | ⚡ | 50 % biotic (food × heavy rain) + 50 % geothermal (volcanic stress); thick-atmosphere hydrocarbon bonus |
+
+Settlements grow through five tiers as population increases: **Outpost** (1–99) → **Settlement** (100–9,999) → **Colony** (10,000–999,999) → **City** (1M–99M) → **Megacity** (100M+). Each tier multiplies production rates (1× / 3× / 8× / 20× / 50×).
+
+The **Settlement Panel** (top-right of the screen) lists all active settlements for the current body, showing each settlement's name, tier, current population, per-tick production rates, and total stockpile. Clicking a row flies the camera to face that tile and opens its tile detail panel. Colonies are cleared when the planet is rebuilt.
 
 ### Mobile Support
 
@@ -274,10 +291,12 @@ js/
   main.js               Entry point — UI wiring, animation loop
   generate.js           Worker dispatcher — posts jobs, handles results
   planet-worker.js      Web Worker — runs geology pipeline off main thread
-  edit-mode.js          Ctrl-click plate toggle, hover info card, tile detail panel (click-to-open, draggable, close-on-outside)
+  edit-mode.js          Ctrl-click plate toggle, hover info card, tile detail panel (click-to-open, draggable, close-on-outside, resource bars, colony founding)
   solar-ui.js           Solar system UI — orrery interaction, body list, saved systems panel, clock controls, system entry/exit, background generation queue
   orrery.js             2D top-down orrery — Kepler orbit solver, Three.js orbit rings and body meshes, HTML label overlay, raycasting
   game-clock.js         Compressed game-time clock — speed levels, Julian Day calendar, pause/resume
+  resources-gen.js      Resource potential layer computation — food, water, metals, fuel per tile (derived from climate + tectonic stress)
+  colony.js             Colony data model — COLONY_TIERS, createColony(), getTier(), colonyProductionRates()
 
   core/                 Pure utilities — no game logic, no external deps
     state.js            Shared mutable application state

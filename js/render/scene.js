@@ -575,3 +575,51 @@ export function tickBodyTransition(dtSec) {
     }
     return true;
 }
+
+/* ── Surface fly-to ─────────────────────────────────────────────────────────
+ * Smoothly orbit the camera to face a given world-space unit direction.
+ * Works like tickBodyTransition: caller should skip tickZoom + ctrl.update()
+ * while tickFlyTo() returns true.
+ */
+let _flyTo = null; // { fromPos, toPos, t, dur }
+
+/**
+ * Begin a smooth camera orbit to face the given world-space direction (need
+ * not be a unit vector — it will be normalised). Also snaps zoom to targetDist
+ * if provided. Call flyToSurfacePoint BEFORE opening any panel that needs the
+ * camera already centred.
+ */
+export function flyToSurfacePoint(nx, ny, nz, targetDist = null) {
+    const dir  = new THREE.Vector3(nx, ny, nz).normalize();
+    const dist = Math.max(ctrl.minDistance, Math.min(ctrl.maxDistance, targetDist ?? camera.position.length()));
+    _zoomTarget = dist; // keep tickZoom in sync after fly-to ends
+    _flyTo = {
+        fromPos: camera.position.clone(),
+        toPos:   dir.multiplyScalar(dist),
+        t: 0,
+        dur: 0.65,
+    };
+}
+
+/**
+ * Advance the surface fly-to animation.
+ * Returns true while animating (caller should skip tickZoom + ctrl.update()).
+ */
+export function tickFlyTo(dtSec) {
+    if (!_flyTo) return false;
+    _flyTo.t = Math.min(_flyTo.t + dtSec / _flyTo.dur, 1);
+    const ease = 1 - Math.pow(1 - _flyTo.t, 3); // ease-out cubic
+    camera.position.lerpVectors(_flyTo.fromPos, _flyTo.toPos, ease);
+    camera.lookAt(0, 0, 0);
+    if (_flyTo.t >= 1) _flyTo = null;
+    return true;
+}
+
+// Colony marker groups — globe-mode 3D dots and map-mode flat discs.
+// Visibility is managed by the animate loop in main.js.
+export const colonyGlobeGroup = new THREE.Group();
+scene.add(colonyGlobeGroup);
+
+export const colonyMapGroup = new THREE.Group();
+colonyMapGroup.visible = false;
+scene.add(colonyMapGroup);

@@ -405,6 +405,12 @@
                     <optgroup label="Elevation">
                         <option value="heightmap">Full Heightmap</option>
                     </optgroup>
+                    <optgroup label="Resources">
+                        <option value="resourceFood">Food Potential</option>
+                        <option value="resourceWater">Water Potential</option>
+                        <option value="resourceMetals">Metal Deposits</option>
+                        <option value="resourceFuel">Fuel Potential</option>
+                    </optgroup>
                 </select>
             </div>
             <div id="vizLegend" class="viz-legend"></div>
@@ -546,6 +552,8 @@
     </button>
     <div id="hoverInfo"></div>
     <div id="tilePanel"></div>
+    <div id="colonyHud" class="hidden"></div>
+    <div id="settlementPanel" class="hidden"></div>
     <div id="info">Drag to rotate &middot; Scroll to zoom &middot; Ctrl-click to reshape continents</div>
 
     <!-- Solar System overlays -->

@@ -76,6 +76,12 @@ function resolveLayerState(debugLayer, debugLayers, mesh, r_elevation) {
     const isHabitability  = debugLayer === 'habitability';
     const habitabilityArr = isHabitability ? (debugLayers && debugLayers.habitability) : null;
     const isFlowAccum     = debugLayer === 'flowAccum';
+    const isResourceFood   = debugLayer === 'resourceFood';
+    const isResourceWater  = debugLayer === 'resourceWater';
+    const isResourceMetals = debugLayer === 'resourceMetals';
+    const isResourceFuel   = debugLayer === 'resourceFuel';
+    const isAnyResource    = isResourceFood || isResourceWater || isResourceMetals || isResourceFuel;
+    const resourceArr      = isAnyResource ? (debugLayers?.[debugLayer] ?? null) : null;
     const _rpTemp  = state.planetaryParams?.baseTemp    ?? 15;
     const _rpHydro = state.planetaryParams?.hydrosphere ?? 3;
     const riversPlausible = _rpHydro >= 1 && _rpTemp > -30 && _rpTemp < 130;
@@ -104,7 +110,7 @@ function resolveLayerState(debugLayer, debugLayers, mesh, r_elevation) {
     let dbgArr = null, dbgMin = 0, dbgMax = 0;
     if (!isHeightmap && !isLandHeightmap && !isOceanCurrent && !isPrecip && !isRainShadow &&
             !isTemp && !isKoppen && !isBiome && !isCont && !isHydroState && !isHabitability &&
-            !isFlowAccum && debugLayer && debugLayers && debugLayers[debugLayer]) {
+            !isFlowAccum && !isAnyResource && debugLayer && debugLayers && debugLayers[debugLayer]) {
         dbgArr = debugLayers[debugLayer];
         for (let r = 0; r < mesh.numRegions; r++) {
             if (dbgArr[r] < dbgMin) dbgMin = dbgArr[r];
@@ -117,6 +123,7 @@ function resolveLayerState(debugLayer, debugLayers, mesh, r_elevation) {
         isKoppen, isBiome, koppenArr, isCont, contArr,
         isHydroState, hydroStateArr, isHabitability, habitabilityArr,
         isFlowAccum, flowAccumArr, flowAccumMax, riverThreshold, riverPathArr,
+        isAnyResource, isResourceFood, isResourceWater, isResourceMetals, isResourceFuel, resourceArr,
         dbgArr, dbgMin, dbgMax,
     };
 }
@@ -129,6 +136,7 @@ function makeColorizer(ls, biomeSmoothed, r_elevation, r_plate, r_stress,
             isKoppen, isBiome, koppenArr, isCont, contArr,
             isHydroState, hydroStateArr, isHabitability, habitabilityArr,
             isFlowAccum, flowAccumArr, flowAccumMax,
+            isAnyResource, isResourceFood, isResourceWater, isResourceMetals, isResourceFuel, resourceArr,
             dbgArr, dbgMin, dbgMax } = ls;
     // Ice cap arrays — snapshot once per colorizer build so lookups are O(1).
     // null when climate hasn't been computed yet (safe — guards below check for null).
@@ -161,6 +169,15 @@ function makeColorizer(ls, biomeSmoothed, r_elevation, r_plate, r_stress,
         if (isHydroState && hydroStateArr)     return hydroStateColor(hydroStateArr[br]);
         if (isHabitability && habitabilityArr) return habitabilityColor(habitabilityArr[br]);
         if (isFlowAccum && flowAccumArr)       return flowAccumColor(flowAccumArr[br], flowAccumMax);
+        if (isAnyResource && resourceArr) {
+            const t = Math.max(0, Math.min(1, resourceArr[br]));
+            let lo, hi;
+            if      (isResourceFood)   { lo = [0.33, 0.20, 0.05]; hi = [0.42, 0.67, 0.23]; }
+            else if (isResourceWater)  { lo = [0.80, 0.72, 0.45]; hi = [0.27, 0.53, 0.80]; }
+            else if (isResourceMetals) { lo = [0.12, 0.12, 0.12]; hi = [0.67, 0.67, 0.67]; }
+            else                       { lo = [0.10, 0.08, 0.05]; hi = [0.87, 0.53, 0.20]; }
+            return [lo[0] + (hi[0] - lo[0]) * t, lo[1] + (hi[1] - lo[1]) * t, lo[2] + (hi[2] - lo[2]) * t];
+        }
         if (isLandHeightmap)                   return landHeightmapColor(r_elevation[br]);
         if (isHeightmap)                       return heightmapColor(r_elevation[br]);
         if (dbgArr)                            return debugValueToColor(dbgArr[br], dbgMin, dbgMax);
@@ -738,3 +755,71 @@ export function updateMeshColors() {
 
 // PNG export -- re-exported from mesh-export.js
 export { exportMap, exportMapBatch } from './mesh-export.js';
+
+// ── Colony markers ──────────────────────────────────────────────────────────
+import { colonyGlobeGroup, colonyMapGroup } from './scene.js';
+
+/** Rebuild 3D colony dots on the globe for all colonies matching `bodyId`. */
+export function drawColonyMarkers(colonies, bodyId) {
+    while (colonyGlobeGroup.children.length) {
+        const child = colonyGlobeGroup.children[0];
+        child.geometry.dispose();
+        child.material.dispose();
+        colonyGlobeGroup.remove(child);
+    }
+    if (!colonies?.length || !state.curData) return;
+    const d = state.curData;
+    const relevant = colonies.filter(c => c.bodyId === bodyId);
+    for (const colony of relevant) {
+        const r = colony.region;
+        if (r < 0 || r >= d.mesh.numRegions) continue;
+        const x = d.r_xyz[r * 3], y = d.r_xyz[r * 3 + 1], z = d.r_xyz[r * 3 + 2];
+        const geo = new THREE.SphereGeometry(0.013, 8, 6);
+        const mat = new THREE.MeshBasicMaterial({ color: 0xffdd44 });
+        const dot = new THREE.Mesh(geo, mat);
+        dot.position.set(x * 1.009, y * 1.009, z * 1.009);
+        dot.userData.region = r;  // used for priority click detection
+        colonyGlobeGroup.add(dot);
+    }
+}
+
+/** Remove all colony markers from both globe and map groups. */
+export function clearColonyMarkers() {
+    while (colonyGlobeGroup.children.length) {
+        const child = colonyGlobeGroup.children[0];
+        child.geometry.dispose();
+        child.material.dispose();
+        colonyGlobeGroup.remove(child);
+    }
+    while (colonyMapGroup.children.length) {
+        const child = colonyMapGroup.children[0];
+        child.geometry.dispose();
+        child.material.dispose();
+        colonyMapGroup.remove(child);
+    }
+}
+
+/** Rebuild flat-disc colony markers on the equirectangular map for all colonies matching `bodyId`. */
+export function updateMapColonyMarkers(colonies, bodyId, mapCenterLonRad = 0) {
+    while (colonyMapGroup.children.length) {
+        const child = colonyMapGroup.children[0];
+        child.geometry.dispose();
+        child.material.dispose();
+        colonyMapGroup.remove(child);
+    }
+    if (!colonies?.length || !state.curData) return;
+    const relevant = colonies.filter(c => c.bodyId === bodyId);
+    const sx = 2 / Math.PI;
+    for (const colony of relevant) {
+        const latRad = colony.lat * (Math.PI / 180);
+        let lonRad   = colony.lon * (Math.PI / 180) - mapCenterLonRad;
+        if (lonRad >  Math.PI) lonRad -= 2 * Math.PI;
+        if (lonRad < -Math.PI) lonRad += 2 * Math.PI;
+        const geo = new THREE.CircleGeometry(0.028, 10);
+        const mat = new THREE.MeshBasicMaterial({ color: 0xffdd44, depthTest: false, side: THREE.DoubleSide });
+        const dot = new THREE.Mesh(geo, mat);
+        dot.position.set(lonRad * sx, latRad * sx, 0.002);
+        dot.userData.region = colony.region;  // used for priority click detection
+        colonyMapGroup.add(dot);
+    }
+}

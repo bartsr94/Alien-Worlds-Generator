@@ -559,6 +559,9 @@ if (worker) {
                 if (msg.windDebugLayers) {
                     Object.assign(d.debugLayers, msg.windDebugLayers);
                 }
+                if (msg.resourceDebugLayers) {
+                    Object.assign(d.debugLayers, msg.resourceDebugLayers);
+                }
                 applyClimateFallback(d, msg.skipClimate);
 
                 const tBuildStart = performance.now();

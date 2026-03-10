@@ -15,6 +15,7 @@ import { computePrecipitation } from './sim/precipitation.js';
 import { computeTemperature } from './sim/temperature.js';
 import { classifyKoppen } from './sim/koppen.js';
 import { buildPlanetaryParams } from './world/planetary-params.js';
+import { computeResourceLayers } from './resources-gen.js';
 import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
 
 setDelaunator(Delaunator);
@@ -337,7 +338,16 @@ function handleGenerate(data) {
             debugLayers.tempWinter = tempResult.r_temperature_winter;
             debugLayers.koppen = cl.koppenResult;
         }
-
+        // Resource potential layers — always computed; heuristic when climate was skipped.
+        {
+            const { r_resource_food, r_resource_water, r_resource_metals, r_resource_fuel } =
+                computeResourceLayers(mesh, r_xyz, r_elevation, r_stress, mountain_r,
+                    skipClimate ? null : tempResult, skipClimate ? null : precipResult, planetaryParams);
+            debugLayers.resourceFood   = r_resource_food;
+            debugLayers.resourceWater  = r_resource_water;
+            debugLayers.resourceMetals = r_resource_metals;
+            debugLayers.resourceFuel   = r_resource_fuel;
+        }
         progress(skipClimate ? 75 : 90, 'Computing triangle elevations\u2026');
         t0 = performance.now();
         const t_elevation = computeTriangleElevations(mesh, r_elevation);
@@ -416,7 +426,9 @@ function handleGenerate(data) {
         const transferList = [
             r_xyz.buffer, t_xyz.buffer, r_plate.buffer,
             prePostElev.buffer, r_elevation.buffer, t_elevation.buffer,
-            r_stress.buffer
+            r_stress.buffer,
+            debugLayers.resourceFood.buffer, debugLayers.resourceWater.buffer,
+            debugLayers.resourceMetals.buffer, debugLayers.resourceFuel.buffer,
         ];
 
         self.postMessage(result, transferList);
@@ -458,7 +470,11 @@ function handleReapply(data) {
             precipResult = cl.precipResult; tempResult = cl.tempResult; koppenResult = cl.koppenResult;
             tWind = cl.tWind; tOcean = cl.tOcean; tPrecip = cl.tPrecip; tTemp = cl.tTemp;
         }
-
+        // Resource layers — heuristic when climate was skipped, full when available.
+        const { r_resource_food: ra_food, r_resource_water: ra_water,
+                r_resource_metals: ra_metals, r_resource_fuel: ra_fuel } =
+            computeResourceLayers(W.mesh, W.r_xyz, r_elevation, W.r_stress, W.mountain_r,
+                skipClimate ? null : tempResult, skipClimate ? null : precipResult, W.planetaryParams);
         progress(skipClimate ? 70 : 90, 'Computing triangle elevations\u2026');
         t0 = performance.now();
         const t_elevation = computeTriangleElevations(W.mesh, r_elevation);
@@ -506,6 +522,12 @@ function handleReapply(data) {
                 tempWinter: tempResult.r_temperature_winter,
                 koppen: koppenResult
             } : null,
+            resourceDebugLayers: {
+                resourceFood:   ra_food,
+                resourceWater:  ra_water,
+                resourceMetals: ra_metals,
+                resourceFuel:   ra_fuel,
+            },
             _reapplyTiming: {
                 clone: tClone,
                 postProcessing: tPost,
@@ -519,7 +541,11 @@ function handleReapply(data) {
             _postTiming: postTiming
         };
 
-        self.postMessage(result, [r_elevation.buffer, t_elevation.buffer, dl_erosionDelta.buffer, dl_flowAccum.buffer, dl_riverPath.buffer]);
+        self.postMessage(result, [
+            r_elevation.buffer, t_elevation.buffer,
+            dl_erosionDelta.buffer, dl_flowAccum.buffer, dl_riverPath.buffer,
+            ra_food.buffer, ra_water.buffer, ra_metals.buffer, ra_fuel.buffer,
+        ]);
 
     } catch (err) {
         self.postMessage({ type: 'error', message: err.message, stack: err.stack });
@@ -584,7 +610,16 @@ function handleEditRecompute(data) {
             debugLayers.tempWinter = tempResult.r_temperature_winter;
             debugLayers.koppen = cl.koppenResult;
         }
-
+        // Resource layers — heuristic when climate was skipped, full when available.
+        {
+            const { r_resource_food, r_resource_water, r_resource_metals, r_resource_fuel } =
+                computeResourceLayers(mesh, r_xyz, r_elevation, r_stress, mountain_r,
+                    skipClimate ? null : tempResult, skipClimate ? null : precipResult, W.planetaryParams);
+            debugLayers.resourceFood   = r_resource_food;
+            debugLayers.resourceWater  = r_resource_water;
+            debugLayers.resourceMetals = r_resource_metals;
+            debugLayers.resourceFuel   = r_resource_fuel;
+        }
         progress(skipClimate ? 75 : 90, 'Computing triangle elevations\u2026');
         t0 = performance.now();
         const t_elevation = computeTriangleElevations(mesh, r_elevation);
@@ -647,7 +682,9 @@ function handleEditRecompute(data) {
         };
 
         self.postMessage(result, [
-            prePostElev.buffer, r_elevation.buffer, t_elevation.buffer, r_stress.buffer
+            prePostElev.buffer, r_elevation.buffer, t_elevation.buffer, r_stress.buffer,
+            debugLayers.resourceFood.buffer, debugLayers.resourceWater.buffer,
+            debugLayers.resourceMetals.buffer, debugLayers.resourceFuel.buffer,
         ]);
 
     } catch (err) {
@@ -668,6 +705,11 @@ function handleComputeClimate() {
 
         const tWorkerTotal = performance.now() - tTotal0;
 
+        const { r_resource_food: cc_food, r_resource_water: cc_water,
+                r_resource_metals: cc_metals, r_resource_fuel: cc_fuel } =
+            computeResourceLayers(W.mesh, W.r_xyz, r_elevation_final, W.r_stress, W.mountain_r,
+                tempResult, precipResult, W.planetaryParams);
+
         const climateDebugLayers = {
             pressureSummer: windResult.r_pressure_summer,
             pressureWinter: windResult.r_pressure_winter,
@@ -680,7 +722,11 @@ function handleComputeClimate() {
             rainShadowWinter: precipResult.r_rainshadow_winter,
             tempSummer: tempResult.r_temperature_summer,
             tempWinter: tempResult.r_temperature_winter,
-            koppen
+            koppen,
+            resourceFood:   cc_food,
+            resourceWater:  cc_water,
+            resourceMetals: cc_metals,
+            resourceFuel:   cc_fuel,
         };
 
         progress(95, 'Done');

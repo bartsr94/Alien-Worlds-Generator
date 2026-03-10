@@ -3,13 +3,16 @@
 // for O(N) dot-product lookups rather than O(N) triangle intersection tests.
 
 import * as THREE from 'three';
-import { canvas, camera, mapCamera, getMoonBodyAtPointer, getParentDiscAtPointer } from './render/scene.js';
+import { canvas, camera, mapCamera, getMoonBodyAtPointer, getParentDiscAtPointer, colonyGlobeGroup, colonyMapGroup } from './render/scene.js';
 import { state } from './core/state.js';
 import { editRecomputeViaWorker } from './generate.js';
-import { computePlateColors, buildMesh, updateHoverHighlight, updateMapHoverHighlight, updateSelectionHighlight, clearSelectionHighlight } from './render/planet-mesh.js';
+import { computePlateColors, buildMesh, updateHoverHighlight, updateMapHoverHighlight, updateSelectionHighlight, clearSelectionHighlight, drawColonyMarkers, updateMapColonyMarkers } from './render/planet-mesh.js';
 import { detailFromSlider } from './core/detail-scale.js';
 import { KOPPEN_CLASSES } from './sim/koppen.js';
 import { elevToHeightKm } from './render/color-map.js';
+import { RESOURCE_TYPES, RESOURCE_LABELS, RESOURCE_ICONS, RESOURCE_COLORS } from './resources-gen.js';
+import { getTier, createColony, colonyProductionRates } from './colony.js';
+import { getGameDays } from './game-clock.js';
 
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -44,6 +47,19 @@ function getHitInfoGlobe(event) {
     mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
+
+    // Priority: check colony markers first with a generous threshold
+    if (colonyGlobeGroup.children.length) {
+        const saved = raycaster.params.Mesh?.threshold;
+        if (raycaster.params.Mesh) raycaster.params.Mesh.threshold = 0.04;
+        const hits = raycaster.intersectObjects(colonyGlobeGroup.children, false);
+        if (raycaster.params.Mesh) raycaster.params.Mesh.threshold = saved ?? 0;
+        if (hits.length) {
+            const r = hits[0].object.userData.region;
+            if (r !== undefined && state.curData)
+                return { region: r, plate: state.curData.r_plate[r] };
+        }
+    }
 
     // Transform ray into planet's local space (handles auto-rotation)
     _inverseMatrix.copy(state.planetMesh.matrixWorld).invert();
@@ -82,6 +98,16 @@ function getHitInfoMap(event) {
     const t = -o.z / d.z;
     const wx = o.x + t * d.x;
     const wy = o.y + t * d.y;
+
+    // Priority: check colony map discs — use Three.js raycaster directly
+    if (colonyMapGroup.children.length) {
+        const hits = raycaster.intersectObjects(colonyMapGroup.children, false);
+        if (hits.length) {
+            const r = hits[0].object.userData.region;
+            if (r !== undefined && state.curData)
+                return { region: r, plate: state.curData.r_plate[r] };
+        }
+    }
 
     // Inverse equirectangular: map coords → lon/lat → unit sphere xyz
     const PI = Math.PI;
@@ -197,6 +223,15 @@ function windSpeedWord(mag) {
 }
 
 /** Map temperature in °C to a CSS colour string. */
+/** Minimal HTML-escape to prevent XSS in user-supplied strings. */
+function htmlEsc(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
 function tempDotColor(c) {
     if (c <= -40) return '#88aaff';
     if (c <=   0) return '#aaccff';
@@ -204,6 +239,58 @@ function tempDotColor(c) {
     if (c <=  30) return '#ffee88';
     if (c <=  50) return '#ffaa44';
     return '#ff4422';
+}
+
+/** Build the resource potential bars section for the tile panel. */
+function buildResourceSectionHTML(region) {
+    const d = state.curData;
+    if (!d?.debugLayers?.resourceFood) {
+        return '<div class="tp-climate-note">Generate a planet to see resource data.</div>';
+    }
+    const layerKeys = { food: 'resourceFood', water: 'resourceWater', metals: 'resourceMetals', fuel: 'resourceFuel' };
+    return RESOURCE_TYPES.map(key => {
+        const val = Math.max(0, Math.min(1, d.debugLayers[layerKeys[key]]?.[region] ?? 0));
+        const pct = Math.round(val * 100);
+        const hex = RESOURCE_COLORS[key];
+        return `<div class="tp-res-row">
+  <span class="tp-res-icon">${RESOURCE_ICONS[key]}</span>
+  <span class="tp-res-lbl">${RESOURCE_LABELS[key]}</span>
+  <span class="tp-res-bar-bg"><span class="tp-res-bar-fill" style="width:${pct}%;background:${hex}"></span></span>
+  <span class="tp-res-pct">${pct}%</span>
+</div>`;
+    }).join('');
+}
+
+/** Build the colony section HTML for a tile panel (founded or founding UI). */
+function buildColonySectionHTML(region) {
+    const bodyId = state.activeBodyId || 'standalone';
+    const colony  = state.colonies.find(c => c.bodyId === bodyId && c.region === region);
+    if (colony) {
+        const tier  = getTier(colony.population);
+        const rates = colonyProductionRates(colony, state.curData);
+        return `<div class="tp-colony-name">${htmlEsc(colony.name)}</div>
+<div class="tp-colony-tier">${tier.name} &middot; Pop. ${colony.population.toLocaleString()}</div>
+<div class="tp-sectitle" style="margin-top:6px;margin-bottom:4px">STOCKPILE</div>
+<div class="tp-colony-rates">
+  <span class="tp-rate-item">${RESOURCE_ICONS.food} ${colony.stockpile.food.toLocaleString()}</span>
+  <span class="tp-rate-item">${RESOURCE_ICONS.water} ${colony.stockpile.water.toLocaleString()}</span>
+  <span class="tp-rate-item">${RESOURCE_ICONS.metals} ${colony.stockpile.metals.toLocaleString()}</span>
+  <span class="tp-rate-item">${RESOURCE_ICONS.fuel} ${colony.stockpile.fuel.toLocaleString()}</span>
+</div>
+<div class="tp-sectitle" style="margin-top:8px;margin-bottom:4px">PRODUCTION / TICK</div>
+<div class="tp-colony-rates">
+  <span class="tp-rate-item">${RESOURCE_ICONS.food} +${rates.food}</span>
+  <span class="tp-rate-item">${RESOURCE_ICONS.water} +${rates.water}</span>
+  <span class="tp-rate-item">${RESOURCE_ICONS.metals} +${rates.metals}</span>
+  <span class="tp-rate-item">${RESOURCE_ICONS.fuel} +${rates.fuel}</span>
+</div>`;
+    }
+    const canFound = !!(state.curData?.debugLayers?.resourceFood);
+    return `<div class="tp-colony-empty">No settlement here yet.</div>
+<div class="tp-colony-name-row">
+  <input class="tp-colony-name-input" id="tp-colony-name" type="text" placeholder="Settlement name\u2026" maxlength="40"${canFound ? '' : ' disabled'}>
+</div>
+<button class="tp-found-btn" id="tp-found-btn" disabled>&#x2295; Found Settlement</button>`;
 }
 
 /** Build the inner HTML for the tile detail panel. */
@@ -303,15 +390,79 @@ function buildTilePanelHTML(region) {
     <div class="tp-row"><span class="tp-lbl">Coords</span><span class="tp-val">${latStr}, ${lonStr}</span></div>
   </div>
   <div class="tp-sec">
+    <div class="tp-sectitle">RESOURCES</div>
+    ${buildResourceSectionHTML(region)}
+  </div>
+  <div class="tp-sec">
     <div class="tp-sectitle">CLIMATE</div>
     ${climateRows}
   </div>
-  <div class="tp-sec">
+  <div class="tp-sec tp-colony-sec">
     <div class="tp-sectitle">COLONY</div>
-    <div class="tp-colony-empty">No settlement here yet.</div>
-    <button class="tp-found-btn" disabled>&#x2295; Found Settlement</button>
+    ${buildColonySectionHTML(region)}
   </div>
 </div>`;
+}
+
+/** Attach drag-to-reposition behavior to a tile panel's header. */
+function setupPanelDrag(panel) {
+    const header = panel.querySelector('.tp-header');
+    if (!header) return;
+    let dragState = null;
+    const onDragMove = (ev) => {
+        if (!dragState) return;
+        const pw = panel.offsetWidth, ph = panel.offsetHeight;
+        panel.style.left = Math.max(0, Math.min(window.innerWidth  - pw, dragState.origLeft + ev.clientX - dragState.startX)) + 'px';
+        panel.style.top  = Math.max(0, Math.min(window.innerHeight - ph, dragState.origTop  + ev.clientY - dragState.startY)) + 'px';
+    };
+    const onDragEnd = () => {
+        dragState = null;
+        document.removeEventListener('pointermove', onDragMove);
+        header.style.cursor = 'grab';
+    };
+    header.addEventListener('pointerdown', (ev) => {
+        if (ev.target.closest('.tp-close')) return;
+        ev.preventDefault();
+        const rect = panel.getBoundingClientRect();
+        dragState = { startX: ev.clientX, startY: ev.clientY, origLeft: rect.left, origTop: rect.top };
+        header.style.cursor = 'grabbing';
+        document.addEventListener('pointermove', onDragMove);
+        document.addEventListener('pointerup', onDragEnd, { once: true });
+    });
+}
+
+/** Wire the colony founding input + button inside the panel's colony section. */
+function wireColonyHandlers(panel, region) {
+    const nameInput = panel.querySelector('#tp-colony-name');
+    const foundBtn  = panel.querySelector('#tp-found-btn');
+    if (!nameInput || !foundBtn) return;
+
+    const updateBtn = () => {
+        const enabled = nameInput.value.trim().length > 0;
+        foundBtn.disabled = !enabled;
+        foundBtn.classList.toggle('enabled', enabled);
+    };
+    nameInput.addEventListener('input', updateBtn);
+
+    foundBtn.addEventListener('click', () => {
+        const name = nameInput.value.trim();
+        if (!name) return;
+        const d  = state.curData;
+        const rx = d.r_xyz[region * 3], ry = d.r_xyz[region * 3 + 1], rz = d.r_xyz[region * 3 + 2];
+        const lat = Math.asin(Math.max(-1, Math.min(1, ry))) * (180 / Math.PI);
+        const lon = Math.atan2(rx, rz) * (180 / Math.PI);
+        const bodyId   = state.activeBodyId || 'standalone';
+        const systemId = state.currentSystemId || null;
+        state.colonies.push(createColony({ bodyId, systemId, region, lat, lon, name, gameDays: getGameDays() }));
+        drawColonyMarkers(state.colonies, bodyId);
+        updateMapColonyMarkers(state.colonies, bodyId, state.mapCenterLon || 0);
+        window._refreshHUD?.();
+        // Re-render colony section in-place (shows info view now that colony exists)
+        const colSec = panel.querySelector('.tp-colony-sec');
+        if (colSec) {
+            colSec.innerHTML = '<div class="tp-sectitle">COLONY</div>' + buildColonySectionHTML(region);
+        }
+    });
 }
 
 /** Show the tile detail panel near (cx, cy) and highlight the clicked region. */
@@ -331,32 +482,8 @@ function showTilePanel(region, cx, cy) {
 
     panel.innerHTML = buildTilePanelHTML(region);
     document.getElementById('tpClose')?.addEventListener('click', hideTilePanel);
-
-    // Drag — pointerdown on the header starts a free drag
-    const header = panel.querySelector('.tp-header');
-    if (header) {
-        let dragState = null;
-        const onDragMove = (ev) => {
-            if (!dragState) return;
-            const pw = panel.offsetWidth, ph = panel.offsetHeight;
-            panel.style.left = Math.max(0, Math.min(window.innerWidth  - pw, dragState.origLeft + ev.clientX - dragState.startX)) + 'px';
-            panel.style.top  = Math.max(0, Math.min(window.innerHeight - ph, dragState.origTop  + ev.clientY - dragState.startY)) + 'px';
-        };
-        const onDragEnd = () => {
-            dragState = null;
-            document.removeEventListener('pointermove', onDragMove);
-            header.style.cursor = 'grab';
-        };
-        header.addEventListener('pointerdown', (ev) => {
-            if (ev.target.closest('.tp-close')) return;
-            ev.preventDefault();
-            const rect = panel.getBoundingClientRect();
-            dragState = { startX: ev.clientX, startY: ev.clientY, origLeft: rect.left, origTop: rect.top };
-            header.style.cursor = 'grabbing';
-            document.addEventListener('pointermove', onDragMove);
-            document.addEventListener('pointerup', onDragEnd, { once: true });
-        });
-    }
+    setupPanelDrag(panel);
+    wireColonyHandlers(panel, region);
 
     // Position: right of click; flip left if near right edge
     const W = 308, margin = 14;
@@ -383,6 +510,15 @@ export function hideTilePanel() {
     clearSelectionHighlight();
     const panel = document.getElementById('tilePanel');
     if (panel) panel.style.display = 'none';
+}
+
+/**
+ * Open the tile panel for the given region, anchored at the horizontal centre
+ * of the screen. Intended for programmatic navigation (e.g. clicking a colony
+ * row in the settlement panel) where there is no pointer event to derive cx/cy.
+ */
+export function showTilePanelCentered(region) {
+    showTilePanel(region, window.innerWidth * 0.5, window.innerHeight * 0.45);
 }
 
 /** Set up hover and ctrl-click event listeners. */
