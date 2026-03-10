@@ -3,7 +3,7 @@
 // for O(N) dot-product lookups rather than O(N) triangle intersection tests.
 
 import * as THREE from 'three';
-import { canvas, camera, mapCamera } from './render/scene.js';
+import { canvas, camera, mapCamera, getMoonBodyAtPointer, getParentDiscAtPointer } from './render/scene.js';
 import { state } from './core/state.js';
 import { editRecomputeViaWorker } from './generate.js';
 import { computePlateColors, buildMesh, updateHoverHighlight, updateMapHoverHighlight, updateSelectionHighlight, clearSelectionHighlight } from './render/planet-mesh.js';
@@ -423,6 +423,13 @@ export function setupEditMode() {
             const wasClick = tdx * tdx + tdy * tdy < 36;
             tileDown = null;
             if (wasClick && !state.solarSystemMode && state.curData) {
+                // Moon disc or parent planet disc click: navigate to that body
+                if (state.currentSystem) {
+                    const moonId = getMoonBodyAtPointer(e);
+                    if (moonId) { window._enterBodyFromClick?.(moonId); return; }
+                    const parentId = getParentDiscAtPointer(e);
+                    if (parentId) { window._enterBodyFromClick?.(parentId); return; }
+                }
                 const hit = getHitInfo(e);
                 if (hit) {
                     showTilePanel(hit.region, e.clientX, e.clientY);

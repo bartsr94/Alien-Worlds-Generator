@@ -47,12 +47,12 @@
             "Glacial, hydraulic, and thermal erosion",
             "Climate simulation with wind, precipitation, and ocean currents",
             "Hotspot volcanism with island chains",
-            "Procedural impact crater generation for airless and trace-atmosphere worlds",
-            "Planetary Physics layer with gravity, atmosphere, hydrosphere, temperature, and axial tilt sliders",
+            "Procedural impact crater generation scaled to world size — tiny moons get Phobos-like crater-dominated terrain",
+            "Planetary Physics layer with gravity, world size, atmosphere, hydrosphere, temperature, and axial tilt sliders",
             "Nine world presets: Earth-like, Mars-like, Venus-like, Titan-like, Dead Rock, Ocean World, Ice Ball, Arid Desert, High Gravity",
             "Atmospheric haze sphere for thick and crushing atmosphere worlds",
             "Interactive plate editing",
-            "Solar System Mode with 2D Keplerian orrery (our solar system + procedural alien systems)",
+            "Solar System Mode with 2D Keplerian orrery (our solar system + procedural alien systems with moons)",
             "Equirectangular map export up to 65536px",
             "Multiple visualization modes (terrain, satellite, climate, heightmap)",
             "Shareable planet codes"
@@ -120,16 +120,16 @@
         <h1>Heliosphere — Procedural Planet Generator</h1>
         <p>Heliosphere is a free, browser-based procedural planet generator. Build terrestrial and alien planets shaped by tectonic plates, erosion, and volcanism — no download or account required.</p>
         <h2>How It Works</h2>
-        <p>Start by selecting a world preset (Earth-like, Mars-like, Venus-like, Titan-like, Dead Rock, Ocean World, Ice Ball, Arid Desert, High Gravity, or Random Alien) or use the five Planetary Physics sliders to customize gravity, atmosphere, hydrosphere, base temperature, and axial tilt. Then adjust detail level, plates, and continents, and click "Build New World" to generate a unique planet with realistic continental shapes, mountain ranges, ocean trenches, volcanic island chains, and hotspot volcanism. Every planet is procedurally generated and completely unique.</p>
+        <p>Start by selecting a world preset (Earth-like, Mars-like, Venus-like, Titan-like, Dead Rock, Ocean World, Ice Ball, Arid Desert, High Gravity, or Random Alien) or use the six Planetary Physics sliders to customize gravity, world size, atmosphere, hydrosphere, base temperature, and axial tilt. Then adjust detail level, plates, and continents, and click "Build New World" to generate a unique planet with realistic continental shapes, mountain ranges, ocean trenches, volcanic island chains, and hotspot volcanism. Every planet is procedurally generated and completely unique.</p>
         <h2>Key Features</h2>
         <ul>
-            <li>Planetary Physics layer — gravity, atmosphere, hydrosphere, base temperature, and axial tilt shape the entire simulation pipeline. Nine world presets produce Mars-like rust deserts, Venus-like hellscapes, Titan-like methane worlds, airless Dead Rock surfaces, and more.</li>
+            <li>Planetary Physics layer — gravity, world size, atmosphere, hydrosphere, base temperature, and axial tilt shape the entire simulation pipeline. Nine world presets produce Mars-like rust deserts, Venus-like hellscapes, Titan-like methane worlds, airless Dead Rock surfaces, and more.</li>
             <li>Tectonic plate simulation with convergent, divergent, and transform boundaries</li>
             <li>Multiple erosion types: glacial (fjords, U-shaped valleys), hydraulic (river valleys), and thermal (talus slopes)</li>
             <li>Climate simulation with seasonal wind patterns, ocean currents, precipitation, and K&ouml;ppen climate classification</li>
             <li>Hotspot volcanism with drift-trail island chains (like Hawaii)</li>
             <li>Interactive plate editing — click any plate to toggle between land and ocean</li>
-            <li>Solar System Mode — explore a 2D Keplerian orrery of our solar system or a procedurally generated alien system; click any rocky or icy world to generate its full globe</li>
+            <li>Solar System Mode — explore a 2D Keplerian orrery of our solar system (including Earth's Moon, Phobos, Deimos) or a procedurally generated alien system with moons; click any rocky, icy, or moon body to generate its full globe; click moon discs in planet view to drill in, click parent disc to return</li>
             <li>Multiple visualization modes: terrain, satellite biome, climate, and heightmap</li>
             <li>28 detailed inspection layers for geology, atmosphere, ocean, climate, and planetary properties</li>
             <li>High-resolution equirectangular map export up to 65,536px wide</li>
@@ -229,6 +229,11 @@
                     <label>Gravity <span class="tip" data-tip="Surface gravity relative to Earth. Low gravity allows taller mountains; high gravity produces squat, compressed terrain.">?</span> <span class="v" id="vGravity">1.0</span>g</label>
                     <input type="range" id="sGravity" min="0.1" max="3.0" value="1.0" step="0.1">
                     <div class="slider-hint"><span>Low (0.1g)</span><span>High (3.0g)</span></div>
+                </div>
+                <div class="cg">
+                    <label>World Size <span class="tip" data-tip="Physical size relative to Earth. Larger worlds appear bigger in solar system view; smaller worlds like moons feel more compact. Independent from gravity.">?</span> <span class="v" id="vWorldSize">1.0</span>×</label>
+                    <input type="range" id="sWorldSize" min="0.1" max="3.0" value="1.0" step="0.1">
+                    <div class="slider-hint"><span>Tiny (0.1×)</span><span>Giant (3.0×)</span></div>
                 </div>
                 <div class="cg">
                     <label>Atmosphere <span class="tip" data-tip="Atmospheric density — affects wind, precipitation, erosion, and the globe's rim glow color.">?</span> <span class="v" id="vAtm">Moderate</span></label>
@@ -446,11 +451,11 @@
                 <h3>Welcome to Heliosphere</h3>
                 <p>The world's most realistic-ish planet generator &mdash; and solar system explorer.</p>
                 <p>Generate unique procedural planets shaped by tectonic forces &mdash; from familiar Earth-like worlds to alien environments like rust deserts, frozen wastelands, methane seas, and crushing hellscapes. Every world is one of a kind.</p>
-                <p>Click <strong>&#x2609; System</strong> in the sidebar to explore an entire solar system &mdash; browse our Solar System or generate a random alien one, then click any rocky world to generate its full globe.</p>
+                <p>Click <strong>&#x2609; System</strong> in the sidebar to explore an entire solar system &mdash; browse our Solar System (including moons like Earth's Moon, Phobos, and Deimos) or generate a random alien one with its own moons, then click any rocky world or moon to generate its full globe.</p>
             </div>
             <div class="tutorial-step" data-step="1">
                 <h3>Shape Your World</h3>
-                <p>Pick a <strong>World Preset</strong> (Mars-like, Venus-like, Titan-like, Dead Rock, Ocean World, and more) or use the individual <strong>Planetary Physics</strong> sliders to set gravity, atmosphere, hydrosphere, temperature, and axial tilt. Use the <strong>Shape Your World</strong> sliders to control detail, plates, continents, and roughness, then hit <strong>Build New World</strong>. The <strong>Detail</strong> slider only changes rendering resolution &mdash; continent shapes stay the same, so you can iterate quickly at low detail and crank it up when the planet looks good. Expand <strong>Terrain Sculpting</strong> to fine-tune erosion and smoothing &mdash; these can be reapplied instantly with the <strong>&#x21bb;</strong> button.</p>
+                <p>Pick a <strong>World Preset</strong> (Mars-like, Venus-like, Titan-like, Dead Rock, Ocean World, and more) or use the individual <strong>Planetary Physics</strong> sliders to set gravity, world size, atmosphere, hydrosphere, temperature, and axial tilt. Use the <strong>Shape Your World</strong> sliders to control detail, plates, continents, and roughness, then hit <strong>Build New World</strong>. The <strong>Detail</strong> slider only changes rendering resolution &mdash; continent shapes stay the same, so you can iterate quickly at low detail and crank it up when the planet looks good. Expand <strong>Terrain Sculpting</strong> to fine-tune erosion and smoothing &mdash; these can be reapplied instantly with the <strong>&#x21bb;</strong> button.</p>
             </div>
             <div class="tutorial-step" data-step="2">
                 <h3>Explore &amp; Edit</h3>

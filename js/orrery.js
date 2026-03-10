@@ -181,12 +181,13 @@ function clearLabels() {
 }
 
 function createLabel(body) {
-    if (!_labelContainer) return;
+    if (!_labelContainer) return null;
     const div  = document.createElement('div');
     div.className = 'orrery-label';
     div.textContent = body.name;
     div.dataset.bodyId = body.id;
     _labelContainer.appendChild(div);
+    return div;
 }
 
 /**
@@ -247,8 +248,20 @@ export function initOrrery(system) {
     ensureLabelContainer();
 
     for (const body of system.bodies) {
-        // Skip moons in the orrery (they orbit parents, not the star)
-        if (body.parentId) continue;
+        if (body.parentId) {
+            // Moon: small disc parented to orreryGroup, no orbit ring
+            const mesh = buildBodyMesh(body);
+            mesh.userData.bodyId    = body.id;
+            mesh.userData.bodyType  = body.type;
+            mesh.userData.parentId  = body.parentId;
+            orreryGroup.add(mesh);
+            _bodyMeshes.set(body.id, mesh);
+            const seed = body.id.charCodeAt(0) + (body.id.charCodeAt(1) || 0);
+            _meanAnoms.set(body.id, (seed * 1.618) % (Math.PI * 2));
+            const lbl = createLabel(body);
+            if (lbl) lbl.classList.add('orrery-moon-label');
+            continue;
+        }
 
         // Orbit ring
         const ring = buildOrbitRing(body);
@@ -281,6 +294,7 @@ export function initOrrery(system) {
 export function tickOrrery(gameDaysDelta) {
     if (!_system) return;
 
+    // First pass: advance all non-moon bodies
     for (const body of _system.bodies) {
         if (body.parentId) continue;
         if (body.type === 'star' || body.type === 'belt') continue;
@@ -298,6 +312,28 @@ export function tickOrrery(gameDaysDelta) {
         const a   = auToScene(body.orbitRadiusAU);
         const pos = orbitPosition(M, body.eccentricity, a);
         mesh.position.set(pos.x, 0, pos.z);
+    }
+
+    // Second pass: position moons relative to their parent
+    const MOON_ORBIT_R = 0.055;
+    for (const body of _system.bodies) {
+        if (!body.parentId) continue;
+        if (!body.orbitalPeriodDays || body.orbitalPeriodDays <= 0) continue;
+
+        const mesh       = _bodyMeshes.get(body.id);
+        const parentMesh = _bodyMeshes.get(body.parentId);
+        if (!mesh || !parentMesh) continue;
+
+        const dM = (gameDaysDelta / body.orbitalPeriodDays) * Math.PI * 2;
+        const M  = ((_meanAnoms.get(body.id) || 0) + dM) % (Math.PI * 2);
+        _meanAnoms.set(body.id, M);
+
+        // Simple circular orbit around parent disc
+        mesh.position.set(
+            parentMesh.position.x + MOON_ORBIT_R * Math.cos(M),
+            0,
+            parentMesh.position.z + MOON_ORBIT_R * Math.sin(M)
+        );
     }
 
     updateOrreryLabels();

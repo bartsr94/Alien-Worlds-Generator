@@ -21,27 +21,31 @@ const SLIDERS = [
     { min: 0,    step: 1,    count: 6   }, // [14] Hydrosphere (0–5)
     { min: -150, step: 5,    count: 131 }, // [15] Base Temperature (-150 to +500°C, 5° steps)
     { min: 0,    step: 1,    count: 91  }, // [16] Axial Tilt (0–90°)
+    { min: 0.1,  step: 0.1,  count: 30  }, // [17] World Size (0.1–3.0, Earth=1.0)
 ];
 
-// Earth-default indices for the five new sliders (used when decoding old codes).
+// Earth-default indices for the new sliders (used when decoding old codes).
 // gravity index 9  = 0.1 + 9*0.1  = 1.0g
 // atmosphere index 3  = Moderate
 // hydrosphere index 3  = Moderate
 // baseTemp index 33 = -150 + 33*5 = +15°C
 // axialTilt index 23 = 23°  (nearest integer to Earth 23.5°)
+// worldSize index 9  = 0.1 + 9*0.1 = 1.0 (Earth-sized)
 const EARTH_GRAVITY_IDX    = 9;
 const EARTH_ATM_IDX        = 3;
 const EARTH_HYDRO_IDX      = 3;
 const EARTH_BASETEMP_IDX   = 33;
 const EARTH_AXIALTILT_IDX  = 23;
+const EARTH_WORLDSIZE_IDX  = 9;
 
 // Mixed-radix bases right-to-left:
 //   twIdx[0], scIdx[1], rsIdx[2], teIdx[3], heIdx[4], glIdx[5], smIdx[6],
 //   nsIdx[7], cnIdx[8], pIdx[9], jIdx[10], nIdx[11],
 //   gravIdx[12], atmIdx[13], hydroIdx[14], btIdx[15], tiltIdx[16], seed
-const RADICES = [21, 21, 21, 21, 21, 21, 21, 51, 10, 117, 21, 2556, 30, 6, 6, 131, 91];
+const RADICES = [21, 21, 21, 21, 21, 21, 21, 51, 10, 117, 21, 2556, 30, 6, 6, 131, 91, 30];
 const SEED_MAX = 16777216; // 2^24
-const BASE_LEN  = 23; // current code length (with planetary physics sliders)
+const BASE_LEN  = 24; // current code length (with world size slider)
+const PREV5_LEN = 23; // previous 23-char codes (before world size) — Earth size default
 const PREV4_LEN = 18; // previous 18-char codes (before planetary physics) — Earth defaults for new sliders
 const PREV3_LEN = 17; // previous 17-char codes (before terrain warp)
 const PREV2_LEN = 16; // previous 16-char codes (before glacial erosion)
@@ -106,13 +110,14 @@ function parseBase36(str) {
  * @param {number} [hydrosphere=3] - Hydrosphere level 0–5
  * @param {number} [baseTemp=15] - Base temperature °C (-150–+500)
  * @param {number} [axialTilt=23] - Axial tilt in degrees (0–90)
- * @returns {string} base36 code (23 chars without edits, 23 + '-' + 2*k with k edits)
+ * @param {number} [worldSize=1.0] - World size relative to Earth (0.1–3.0)
+ * @returns {string} base36 code (24 chars without edits, 24 + '-' + 2*k with k edits)
  */
 export function encodePlanetCode(
     seed, N, jitter, P, numContinents, roughness,
     terrainWarp, smoothing, glacialErosion, hydraulicErosion, thermalErosion, ridgeSharpening, soilCreep,
     toggledIndices = [],
-    gravity = 1.0, atmosphere = 3, hydrosphere = 3, baseTemp = 15, axialTilt = 23
+    gravity = 1.0, atmosphere = 3, hydrosphere = 3, baseTemp = 15, axialTilt = 23, worldSize = 1.0
 ) {
     const nIdx    = toIndex(N, SLIDERS[0]);
     const jIdx    = toIndex(jitter, SLIDERS[1]);
@@ -131,11 +136,13 @@ export function encodePlanetCode(
     const hydroIdx= toIndex(hydrosphere, SLIDERS[14]);
     const btIdx   = toIndex(baseTemp,    SLIDERS[15]);
     const tiltIdx = toIndex(axialTilt,   SLIDERS[16]);
+    const wsIdx   = toIndex(worldSize,   SLIDERS[17]);
 
     // Mixed-radix packing — seed is the most-significant residual.
-    // Pack order (most→least significant): seed, tiltIdx, btIdx, hydroIdx, atmIdx,
+    // Pack order (most→least significant): seed, wsIdx, tiltIdx, btIdx, hydroIdx, atmIdx,
     //   gravIdx, nIdx, jIdx, pIdx, cnIdx, nsIdx, smIdx, glIdx, heIdx, teIdx, rsIdx, scIdx, twIdx
     let packed = BigInt(seed);
+    packed = packed * BigInt(RADICES[17]) + BigInt(wsIdx);   // * 30
     packed = packed * BigInt(RADICES[16]) + BigInt(tiltIdx); // * 91
     packed = packed * BigInt(RADICES[15]) + BigInt(btIdx);   // * 131
     packed = packed * BigInt(RADICES[14]) + BigInt(hydroIdx);// * 6
@@ -166,7 +173,7 @@ export function encodePlanetCode(
     return code;
 }
 
-// Earth-default planetary physics values — returned for all pre-planetary-physics codes.
+// Earth-default planetary physics values — returned for all pre-world-size codes.
 function earthPhysicsDefaults() {
     return {
         gravity:     fromIndex(EARTH_GRAVITY_IDX,   SLIDERS[12]),
@@ -174,6 +181,7 @@ function earthPhysicsDefaults() {
         hydrosphere: fromIndex(EARTH_HYDRO_IDX,     SLIDERS[14]),
         baseTemp:    fromIndex(EARTH_BASETEMP_IDX,  SLIDERS[15]),
         axialTilt:   fromIndex(EARTH_AXIALTILT_IDX, SLIDERS[16]),
+        worldSize:   fromIndex(EARTH_WORLDSIZE_IDX, SLIDERS[17]),
     };
 }
 
@@ -199,8 +207,9 @@ export function decodePlanetCode(code) {
     const isPrev2  = base.length === PREV2_LEN;
     const isPrev3  = base.length === PREV3_LEN;
     const isPrev4  = base.length === PREV4_LEN;
+    const isPrev5  = base.length === PREV5_LEN;
     const isNew    = base.length === BASE_LEN;
-    if (!isLegacy && !isPrev && !isPrev2 && !isPrev3 && !isPrev4 && !isNew) return null;
+    if (!isLegacy && !isPrev && !isPrev2 && !isPrev3 && !isPrev4 && !isPrev5 && !isNew) return null;
     if (!/^[0-9a-z]+$/.test(base)) return null;
     if (toggleStr && !/^[0-9a-z]+$/.test(toggleStr)) return null;
     if (toggleStr && toggleStr.length % IDX_CHARS !== 0) return null;
@@ -562,7 +571,62 @@ export function decodePlanetCode(code) {
         };
     }
 
-    // New 23-char decode: all sliders including planetary physics.
+    if (isPrev5) {
+        // Previous5-gen 23-char decode: all sliders before world size was added.
+        const twIdx   = Number(packed % BigInt(RADICES[0]));  packed = packed / BigInt(RADICES[0]);
+        const scIdx   = Number(packed % BigInt(RADICES[1]));  packed = packed / BigInt(RADICES[1]);
+        const rsIdx   = Number(packed % BigInt(RADICES[2]));  packed = packed / BigInt(RADICES[2]);
+        const teIdx   = Number(packed % BigInt(RADICES[3]));  packed = packed / BigInt(RADICES[3]);
+        const heIdx   = Number(packed % BigInt(RADICES[4]));  packed = packed / BigInt(RADICES[4]);
+        const glIdx   = Number(packed % BigInt(RADICES[5]));  packed = packed / BigInt(RADICES[5]);
+        const smIdx   = Number(packed % BigInt(RADICES[6]));  packed = packed / BigInt(RADICES[6]);
+        const nsIdx   = Number(packed % BigInt(RADICES[7]));  packed = packed / BigInt(RADICES[7]);
+        const cnIdx   = Number(packed % BigInt(RADICES[8]));  packed = packed / BigInt(RADICES[8]);
+        const pIdx    = Number(packed % BigInt(RADICES[9]));  packed = packed / BigInt(RADICES[9]);
+        const jIdx    = Number(packed % BigInt(RADICES[10])); packed = packed / BigInt(RADICES[10]);
+        const nIdx    = Number(packed % BigInt(RADICES[11])); packed = packed / BigInt(RADICES[11]);
+        const gravIdx = Number(packed % BigInt(RADICES[12])); packed = packed / BigInt(RADICES[12]);
+        const atmIdx  = Number(packed % BigInt(RADICES[13])); packed = packed / BigInt(RADICES[13]);
+        const hydroIdx= Number(packed % BigInt(RADICES[14])); packed = packed / BigInt(RADICES[14]);
+        const btIdx   = Number(packed % BigInt(RADICES[15])); packed = packed / BigInt(RADICES[15]);
+        const tiltIdx = Number(packed % BigInt(RADICES[16])); packed = packed / BigInt(RADICES[16]);
+        const seed = Number(packed);
+        if (seed < 0 || seed >= SEED_MAX) return null;
+        if (nIdx    >= SLIDERS[0].count  || jIdx  >= SLIDERS[1].count  ||
+            pIdx    >= SLIDERS[2].count  || cnIdx >= SLIDERS[3].count  ||
+            nsIdx   >= SLIDERS[4].count  || smIdx >= SLIDERS[5].count  ||
+            glIdx   >= SLIDERS[6].count  || heIdx >= SLIDERS[7].count  ||
+            teIdx   >= SLIDERS[8].count  || rsIdx >= SLIDERS[9].count  ||
+            scIdx   >= SLIDERS[10].count || twIdx >= SLIDERS[11].count ||
+            gravIdx >= SLIDERS[12].count || atmIdx >= SLIDERS[13].count ||
+            hydroIdx>= SLIDERS[14].count || btIdx >= SLIDERS[15].count ||
+            tiltIdx >= SLIDERS[16].count) return null;
+        const P = fromIndex(pIdx, SLIDERS[2]);
+        const toggledIndices = [];
+        if (toggleStr) {
+            for (let i = 0; i < toggleStr.length; i += IDX_CHARS) {
+                const idx = parseInt(toggleStr.slice(i, i + IDX_CHARS), 36);
+                if (isNaN(idx) || idx >= P) return null;
+                toggledIndices.push(idx);
+            }
+        }
+        return {
+            seed,
+            N: fromIndex(nIdx, SLIDERS[0]), jitter: fromIndex(jIdx, SLIDERS[1]), P,
+            numContinents: fromIndex(cnIdx, SLIDERS[3]), roughness: fromIndex(nsIdx, SLIDERS[4]),
+            terrainWarp: fromIndex(twIdx, SLIDERS[11]), smoothing: fromIndex(smIdx, SLIDERS[5]),
+            glacialErosion: fromIndex(glIdx, SLIDERS[6]), hydraulicErosion: fromIndex(heIdx, SLIDERS[7]),
+            thermalErosion: fromIndex(teIdx, SLIDERS[8]), ridgeSharpening: fromIndex(rsIdx, SLIDERS[9]),
+            soilCreep: fromIndex(scIdx, SLIDERS[10]),
+            gravity: fromIndex(gravIdx, SLIDERS[12]), atmosphere: fromIndex(atmIdx, SLIDERS[13]),
+            hydrosphere: fromIndex(hydroIdx, SLIDERS[14]), baseTemp: fromIndex(btIdx, SLIDERS[15]),
+            axialTilt: fromIndex(tiltIdx, SLIDERS[16]),
+            worldSize: fromIndex(EARTH_WORLDSIZE_IDX, SLIDERS[17]), // default Earth size
+            toggledIndices,
+        };
+    }
+
+    // New 24-char decode: all sliders including world size.
     const twIdx   = Number(packed % BigInt(RADICES[0]));  packed = packed / BigInt(RADICES[0]);
     const scIdx   = Number(packed % BigInt(RADICES[1]));  packed = packed / BigInt(RADICES[1]);
     const rsIdx   = Number(packed % BigInt(RADICES[2]));  packed = packed / BigInt(RADICES[2]);
@@ -580,6 +644,7 @@ export function decodePlanetCode(code) {
     const hydroIdx= Number(packed % BigInt(RADICES[14])); packed = packed / BigInt(RADICES[14]);
     const btIdx   = Number(packed % BigInt(RADICES[15])); packed = packed / BigInt(RADICES[15]);
     const tiltIdx = Number(packed % BigInt(RADICES[16])); packed = packed / BigInt(RADICES[16]);
+    const wsIdx   = Number(packed % BigInt(RADICES[17])); packed = packed / BigInt(RADICES[17]);
 
     const seed = Number(packed);
 
@@ -593,7 +658,7 @@ export function decodePlanetCode(code) {
         scIdx   >= SLIDERS[10].count || twIdx >= SLIDERS[11].count ||
         gravIdx >= SLIDERS[12].count || atmIdx >= SLIDERS[13].count ||
         hydroIdx>= SLIDERS[14].count || btIdx >= SLIDERS[15].count ||
-        tiltIdx >= SLIDERS[16].count) return null;
+        tiltIdx >= SLIDERS[16].count || wsIdx >= SLIDERS[17].count) return null;
 
     const P = fromIndex(pIdx, SLIDERS[2]);
 
@@ -626,6 +691,7 @@ export function decodePlanetCode(code) {
         hydrosphere:      fromIndex(hydroIdx, SLIDERS[14]),
         baseTemp:         fromIndex(btIdx,    SLIDERS[15]),
         axialTilt:        fromIndex(tiltIdx,  SLIDERS[16]),
+        worldSize:        fromIndex(wsIdx,    SLIDERS[17]),
         toggledIndices,
     };
 }

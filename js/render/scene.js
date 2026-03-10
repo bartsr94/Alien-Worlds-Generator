@@ -353,3 +353,225 @@ export function switchToPlanetView() {
     scene.background   = new THREE.Color(0x030308);
     ctrl.enabled       = true;
 }
+
+// ── Moon discs and parent planet disc in globe view ───────────────────────────
+
+const MOON_ORBIT_RADIUS = 2.5; // scene units from planet centre
+
+let _moonMeshes      = [];    // [{ mesh, bodyId, angle, periodDays, label }]
+let _moonOrbitLines  = [];    // orbit ring lines (not raycasted)
+let _parentDiscMesh  = null;  // sphere shown when viewing a moon
+let _parentDiscBodyId = null;
+let _parentLabel     = null;  // floating HTML label near the parent disc
+
+const _moonRaycaster = new THREE.Raycaster();
+const _moonMouse     = new THREE.Vector2();
+
+/**
+ * Create / update the moon discs visible around the current planet in globe view.
+ * Disposes any previously created moon discs automatically.
+ * @param {object|null} currentBody  The body being viewed.
+ * @param {object[]}    allBodies    Array of all bodies in the system.
+ */
+export function updateMoonScene(currentBody, allBodies) {
+    for (const m of _moonMeshes) {
+        m.mesh.geometry.dispose(); m.mesh.material.dispose(); scene.remove(m.mesh);
+        if (m.label) m.label.remove();
+    }
+    for (const line of _moonOrbitLines) {
+        line.geometry.dispose(); line.material.dispose(); scene.remove(line);
+    }
+    _moonMeshes = [];
+    _moonOrbitLines = [];
+    if (!currentBody || !allBodies) return;
+
+    const moons = allBodies.filter(b => b.parentId === currentBody.id && b.params);
+    moons.forEach((moon, idx) => {
+        // Stagger orbit radii slightly so multiple moons don't look like one
+        const orbitR = MOON_ORBIT_RADIUS + idx * 0.35;
+
+        // Orbit ring
+        const ringPts = [];
+        for (let i = 0; i <= 96; i++) {
+            const t = (i / 96) * Math.PI * 2;
+            ringPts.push(new THREE.Vector3(orbitR * Math.cos(t), 0, orbitR * Math.sin(t)));
+        }
+        const ringGeo = new THREE.BufferGeometry().setFromPoints(ringPts);
+        const ringMat = new THREE.LineBasicMaterial({ color: 0x445566, transparent: true, opacity: 0.4 });
+        const orbitLine = new THREE.Line(ringGeo, ringMat);
+        scene.add(orbitLine);
+        _moonOrbitLines.push(orbitLine);
+
+        // Moon sphere
+        const ws  = moon.params.worldSize ?? 0.3;
+        const r   = Math.max(0.035, 0.14 * ws);
+        const geo = new THREE.SphereGeometry(r, 16, 10);
+        const mat = new THREE.MeshLambertMaterial({ color: 0xbbbbcc });
+        const mesh = new THREE.Mesh(geo, mat);
+
+        // Invisible hit sphere — 4× visual radius so it's easy to click
+        const hitGeo = new THREE.SphereGeometry(r * 4, 6, 4);
+        const hitMat = new THREE.MeshBasicMaterial({ visible: false });
+        const hitMesh = new THREE.Mesh(hitGeo, hitMat);
+        hitMesh.visible = false;
+        mesh.add(hitMesh); // parented to visual mesh; shares world transform
+
+        const initialAngle = (idx / Math.max(moons.length, 1)) * Math.PI * 2;
+        mesh.position.set(orbitR * Math.cos(initialAngle), 0, orbitR * Math.sin(initialAngle));
+        mesh.userData.bodyId = moon.id;
+        scene.add(mesh);
+
+        // Floating name label
+        const label = document.createElement('div');
+        label.className = 'moon-globe-label';
+        label.textContent = moon.name;
+        document.body.appendChild(label);
+
+        const periodDays = moon.orbitalPeriodDays ?? 27;
+        _moonMeshes.push({ mesh, hitMesh, bodyId: moon.id, angle: initialAngle, periodDays, orbitR, label });
+    });
+}
+
+/**
+ * Create / update the parent planet disc shown when viewing a moon.
+ * Placed at x=+10 in globe space so it is clearly off to the side.
+ * @param {object|null} currentBody  The body being viewed.
+ * @param {object[]}    allBodies    Array of all bodies in the system.
+ */
+export function updateParentScene(currentBody, allBodies) {
+    if (_parentDiscMesh) {
+        _parentDiscMesh.geometry.dispose(); _parentDiscMesh.material.dispose();
+        scene.remove(_parentDiscMesh);
+        _parentDiscMesh = null; _parentDiscBodyId = null;
+    }
+    if (_parentLabel) { _parentLabel.remove(); _parentLabel = null; }
+    if (!currentBody?.parentId || !allBodies) return;
+    const parent = allBodies.find(b => b.id === currentBody.parentId);
+    if (!parent) return;
+
+    const ws  = parent.params?.worldSize ?? 1.0;
+    const r   = Math.max(0.14, 0.36 * ws);
+    const geo = new THREE.SphereGeometry(r, 24, 16);
+    const mat = new THREE.MeshLambertMaterial({ color: 0x5577aa });
+    _parentDiscMesh = new THREE.Mesh(geo, mat);
+    _parentDiscMesh.position.set(10, 0, 0);
+    _parentDiscMesh.userData.bodyId = parent.id;
+    _parentDiscBodyId = parent.id;
+    scene.add(_parentDiscMesh);
+
+    _parentLabel = document.createElement('div');
+    _parentLabel.className = 'moon-globe-label parent-globe-label';
+    _parentLabel.textContent = `↖ ${parent.name}`;
+    document.body.appendChild(_parentLabel);
+}
+
+/**
+ * Advance moon orbital positions every animation frame.
+ * Uses a visual time scale so orbits are always perceptible on screen:
+ * each moon completes one orbit in max(5, periodDays/2) real seconds.
+ * @param {number} dtSec  Real-time elapsed seconds since the last frame.
+ */
+export function tickMoonOrbits(dtSec) {
+    for (const m of _moonMeshes) {
+        const visualPeriodSec = Math.max(40, m.periodDays * 3);
+        m.angle += (dtSec / visualPeriodSec) * Math.PI * 2;
+        m.mesh.position.set(
+            m.orbitR * Math.cos(m.angle), 0,
+            m.orbitR * Math.sin(m.angle)
+        );
+    }
+}
+
+/**
+ * Project moon and parent-disc positions to screen coordinates and
+ * reposition their floating HTML labels. Call every frame from the
+ * globe-view animate branch.
+ */
+export function updateMoonLabels() {
+    const rect = canvas.getBoundingClientRect();
+    for (const m of _moonMeshes) {
+        if (!m.label) continue;
+        const pos = m.mesh.position.clone().project(camera);
+        if (pos.z > 1) { m.label.style.display = 'none'; continue; }
+        m.label.style.display = 'block';
+        m.label.style.left = `${(pos.x *  0.5 + 0.5) * rect.width  + rect.left}px`;
+        m.label.style.top  = `${(pos.y * -0.5 + 0.5) * rect.height + rect.top - 18}px`;
+    }
+    if (_parentLabel && _parentDiscMesh) {
+        const pos = _parentDiscMesh.position.clone().project(camera);
+        _parentLabel.style.display = pos.z <= 1 ? 'block' : 'none';
+        _parentLabel.style.left = `${(pos.x *  0.5 + 0.5) * rect.width  + rect.left}px`;
+        _parentLabel.style.top  = `${(pos.y * -0.5 + 0.5) * rect.height + rect.top - 18}px`;
+    }
+}
+
+/**
+ * Returns the bodyId of the moon disc under the pointer, or null.
+ * @param {PointerEvent|MouseEvent} event
+ */
+export function getMoonBodyAtPointer(event) {
+    if (_moonMeshes.length === 0) return null;
+    const rect = canvas.getBoundingClientRect();
+    _moonMouse.x =  ((event.clientX - rect.left) / rect.width)  * 2 - 1;
+    _moonMouse.y = -((event.clientY - rect.top)  / rect.height) * 2 + 1;
+    _moonRaycaster.setFromCamera(_moonMouse, camera);
+    // Use hit spheres (4× visual radius) so the click target is generous
+    const hits = _moonRaycaster.intersectObjects(_moonMeshes.map(m => m.hitMesh), false);
+    return hits.length > 0 ? hits[0].object.parent.userData.bodyId : null;
+}
+
+/**
+ * Returns the bodyId of the parent planet disc under the pointer, or null.
+ * @param {PointerEvent|MouseEvent} event
+ */
+export function getParentDiscAtPointer(event) {
+    if (!_parentDiscMesh) return null;
+    const rect = canvas.getBoundingClientRect();
+    _moonMouse.x =  ((event.clientX - rect.left) / rect.width)  * 2 - 1;
+    _moonMouse.y = -((event.clientY - rect.top)  / rect.height) * 2 + 1;
+    _moonRaycaster.setFromCamera(_moonMouse, camera);
+    const hits = _moonRaycaster.intersectObject(_parentDiscMesh, false);
+    return hits.length > 0 ? _parentDiscBodyId : null;
+}
+
+// ── Camera fly-in transition when entering a new body ─────────────────────────
+
+let _bodyTransition = null; // { t, dur, fromPos, toPos }
+
+/**
+ * Begin a smooth camera fly-in toward the planet.
+ * Places the camera far away and animates it to the standard close view.
+ * Call this whenever entering a new solar body.
+ */
+export function startBodyTransition() {
+    ctrl.target.set(0, 0, 0);
+    camera.position.set(0, 1.0, 9);
+    camera.lookAt(0, 0, 0);
+    _zoomTarget = Math.sqrt(0 + 0.4 * 0.4 + 2.8 * 2.8); // ~2.83, normal zoom
+    _bodyTransition = {
+        t: 0,
+        dur: 2.0,
+        fromPos: new THREE.Vector3(0, 1.0, 9),
+        toPos:   new THREE.Vector3(0, 0.4, 2.8),
+    };
+}
+
+/**
+ * Advance the body-entry camera transition.
+ * Returns true while a transition is in progress (caller should skip tickZoom
+ * and ctrl.update() while this returns true).
+ * @param {number} dtSec
+ */
+export function tickBodyTransition(dtSec) {
+    if (!_bodyTransition) return false;
+    _bodyTransition.t = Math.min(_bodyTransition.t + dtSec / _bodyTransition.dur, 1);
+    const ease = 1 - Math.pow(1 - _bodyTransition.t, 3); // ease-out cubic
+    camera.position.lerpVectors(_bodyTransition.fromPos, _bodyTransition.toPos, ease);
+    camera.lookAt(0, 0, 0);
+    if (_bodyTransition.t >= 1) {
+        _bodyTransition = null;
+        // On the very next frame ctrl.update() will read our final position
+        // and sync its internal spherical to match — no snap.
+    }
+    return true;
+}

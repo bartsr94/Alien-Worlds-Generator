@@ -69,7 +69,7 @@ function craterProfile(t, depth, rimH, complex) {
 // BFS — collect all cells within maxHops, return their arc-distances in km
 // ---------------------------------------------------------------------------
 
-function bfsWithinRadius(mesh, r_xyz, centre, maxHops, avgEdgeKm) {
+function bfsWithinRadius(mesh, r_xyz, centre, maxHops, avgEdgeKm, worldRadiusKm) {
     const { adjOffset, adjList, numRegions } = mesh;
     const maxDistKm = maxHops * avgEdgeKm * 1.15; // slight buffer beyond integer hops
 
@@ -86,7 +86,7 @@ function bfsWithinRadius(mesh, r_xyz, centre, maxHops, avgEdgeKm) {
         const r = queue[qi];
         const rx = r_xyz[3 * r], ry = r_xyz[3 * r + 1], rz = r_xyz[3 * r + 2];
         const dot = Math.min(1, Math.max(-1, CX * rx + CY * ry + CZ * rz));
-        const distKm = Math.acos(dot) * 6371;
+        const distKm = Math.acos(dot) * worldRadiusKm;
 
         if (distKm > maxDistKm) continue;
 
@@ -113,7 +113,7 @@ function bfsWithinRadius(mesh, r_xyz, centre, maxHops, avgEdgeKm) {
 // ---------------------------------------------------------------------------
 
 function stampOneCrater(mesh, r_xyz, r_elevation, centreIdx, radiusKm,
-                        avgEdgeKm, gravity, degradation) {
+                        avgEdgeKm, gravity, degradation, worldRadiusKm) {
     // Depth and rim height in normalised elevation units.
     // Depth scales with sqrt(radius) — large craters are relatively shallower.
     // Gravity: lower gravity → deeper craters for the same impactor energy.
@@ -126,7 +126,7 @@ function stampOneCrater(mesh, r_xyz, r_elevation, centreIdx, radiusKm,
     // Maximum BFS reach: extend 1.6× radius to cover full ejecta blanket
     const maxHops = Math.max(2, Math.round(radiusKm * 1.6 / avgEdgeKm));
 
-    const cells = bfsWithinRadius(mesh, r_xyz, centreIdx, maxHops, avgEdgeKm);
+    const cells = bfsWithinRadius(mesh, r_xyz, centreIdx, maxHops, avgEdgeKm, worldRadiusKm);
 
     // Pre-flatten the bowl floor for mega-basins (R > 350 km): bring existing
     // terrain to a neutral level so old mountains inside the basin look right.
@@ -176,23 +176,32 @@ function stampOneCrater(mesh, r_xyz, r_elevation, centreIdx, radiusKm,
 export function stampCraters(mesh, r_xyz, r_elevation, seed, planetaryParams) {
     const { numRegions } = mesh;
 
-    const atm      = planetaryParams?.atmosphere ?? 0;
-    const gravity  = planetaryParams?.gravity    ?? 1.0;
+    const atm       = planetaryParams?.atmosphere  ?? 0;
+    const gravity   = planetaryParams?.gravity     ?? 1.0;
+    const worldSize = planetaryParams?.worldSize   ?? 1.0;
 
     // Only run on airless (0) or trace-atmosphere (1) worlds
     if (atm > 1) return;
 
-    // Average physical edge length — used for all BFS hop calculations
-    const avgEdgeKm = (Math.PI * 6371) / Math.sqrt(numRegions);
+    // Physical radius and edge length for THIS world — not hardcoded to Earth.
+    // This ensures a "400 km" crater spans the same physical fraction of the
+    // sphere regardless of world size, and hop counts are correctly computed.
+    const worldRadiusKm = worldSize * 6371;
+    const avgEdgeKm = (Math.PI * worldRadiusKm) / Math.sqrt(numRegions);
 
     // Degradation factor for atmosphere=1 (eroded rims, shallower bowls)
     const degradation = atm === 0 ? 0.0 : 0.45;
 
-    // Intensity multiplier: trace atmosphere → 35% of airless count
-    const intensityMult = atm === 0 ? 1.0 : 0.35;
+    // Intensity multiplier: trace atmosphere → 35% of airless count.
+    // Small worlds accumulate craters faster relative to their surface area.
+    const intensityMult = (atm === 0 ? 1.0 : 0.35) * Math.min(2.5, 1.0 / Math.max(0.4, worldSize));
+
+    // Maximum individual crater radius clipped to 55% of world radius so no
+    // single crater wraps around more than half the globe.
+    const maxCraterR = 0.55 * worldRadiusKm;
 
     // ── Crater population: [minRadiusKm, maxRadiusKm, count] ─────────────────
-    // Counts are for a fully saturated airless world (intensityMult = 1.0).
+    // Counts are for a fully saturated airless Earth-sized world.
     // Tiers mirror the real Solar System size-frequency distribution.
     const tiers = [
         [ 400, 1400, 2  ],   // mega-basins   (Hellas / Caloris class)
@@ -206,10 +215,11 @@ export function stampCraters(mesh, r_xyz, r_elevation, seed, planetaryParams) {
 
     // Collect all craters, sort large → small (old basins first, fresh small last)
     const craters = [];
-    for (const [minR, maxR, baseCount] of tiers) {
+    for (const [minR, rawMaxR, baseCount] of tiers) {
+        const maxR = Math.min(rawMaxR, maxCraterR);
+        if (minR > maxCraterR) continue; // tier entirely above world size — skip
         const count = Math.round(baseCount * intensityMult);
         for (let i = 0; i < count; i++) {
-            // Power-law sample within tier: bias toward the smaller end
             const t = Math.pow(rng(), 1.6);
             const radiusKm = minR + t * (maxR - minR);
             const centreIdx = Math.floor(rng() * numRegions);
@@ -220,11 +230,10 @@ export function stampCraters(mesh, r_xyz, r_elevation, seed, planetaryParams) {
 
     // Stamp each crater in descending size order
     for (const { radiusKm, centreIdx } of craters) {
-        // Skip micro-craters that would be sub-cell at this resolution
         const hops = radiusKm / avgEdgeKm;
         if (hops < 0.6) continue;
 
         stampOneCrater(mesh, r_xyz, r_elevation, centreIdx, radiusKm,
-                       avgEdgeKm, gravity, degradation);
+                       avgEdgeKm, gravity, degradation, worldRadiusKm);
     }
 }

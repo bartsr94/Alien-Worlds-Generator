@@ -144,6 +144,7 @@ function atmToHazeOpacity(atm, tempC) {
  *
  * @param {object} sliders
  * @param {number} [sliders.gravity=1.0]     - Surface gravity in g (0.1–3.0)
+ * @param {number} [sliders.worldSize=1.0]   - World size relative to Earth (0.1–3.0)
  * @param {number} [sliders.atmosphere=3]    - Atmosphere level 0–5
  * @param {number} [sliders.hydrosphere=3]   - Hydrosphere level 0–5
  * @param {number} [sliders.baseTemp=15]     - Base surface temperature °C (-150–500)
@@ -153,6 +154,7 @@ function atmToHazeOpacity(atm, tempC) {
  */
 export function buildPlanetaryParams(sliders = {}) {
     const g    = sliders.gravity     ?? 1.0;
+    const ws   = sliders.worldSize   ?? 1.0;
     const atm  = sliders.atmosphere  ?? 3;
     const hydro= sliders.hydrosphere ?? 3;
     const tempC= sliders.baseTemp    ?? 15;
@@ -165,11 +167,16 @@ export function buildPlanetaryParams(sliders = {}) {
     return {
         // ── Raw inputs ───────────────────────────────────────────────────────
         gravity:     g,
+        worldSize:   ws,
         atmosphere:  atm,
         hydrosphere: hydro,
         baseTemp:    tempC,
         axialTilt:   tilt,
         preset,
+
+        // ── Physical size ──────────────────────────────────────────────────────────────
+        // radiusKm: Earth radius (6371 km) scaled by world size
+        radiusKm:    Math.round(ws * 6371),
 
         // ── Elevation ────────────────────────────────────────────────────────
         // maxElevationKm: Everest-equivalent at 1g = 8.8 km

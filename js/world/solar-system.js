@@ -44,7 +44,7 @@ export const OUR_SOLAR_SYSTEM = {
             inclination: 7.0,
             radiusKm: 2439,
             parentId: null,
-            params: { gravity: 0.38, atmosphere: 0, hydrosphere: 0, baseTemp: 167, axialTilt: 0 },
+            params: { gravity: 0.38, worldSize: 0.4, atmosphere: 0, hydrosphere: 0, baseTemp: 167, axialTilt: 0 },
         },
         {
             id: 'venus',
@@ -56,7 +56,7 @@ export const OUR_SOLAR_SYSTEM = {
             inclination: 3.4,
             radiusKm: 6051,
             parentId: null,
-            params: { gravity: 0.9, atmosphere: 5, hydrosphere: 0, baseTemp: 460, axialTilt: 177 },
+            params: { gravity: 0.9, worldSize: 1.0, atmosphere: 5, hydrosphere: 0, baseTemp: 460, axialTilt: 177 },
         },
         {
             id: 'earth',
@@ -68,7 +68,7 @@ export const OUR_SOLAR_SYSTEM = {
             inclination: 0.0,
             radiusKm: 6371,
             parentId: null,
-            params: { gravity: 1.0, atmosphere: 3, hydrosphere: 3, baseTemp: 15, axialTilt: 23 },
+            params: { gravity: 1.0, worldSize: 1.0, atmosphere: 3, hydrosphere: 3, baseTemp: 15, axialTilt: 23 },
         },
         {
             id: 'moon',
@@ -80,7 +80,7 @@ export const OUR_SOLAR_SYSTEM = {
             inclination: 5.1,
             radiusKm: 1737,
             parentId: 'earth',
-            params: { gravity: 0.17, atmosphere: 0, hydrosphere: 0, baseTemp: -20, axialTilt: 7 },
+            params: { gravity: 0.17, worldSize: 0.3, atmosphere: 0, hydrosphere: 0, baseTemp: -20, axialTilt: 7 },
         },
         {
             id: 'mars',
@@ -92,7 +92,7 @@ export const OUR_SOLAR_SYSTEM = {
             inclination: 1.9,
             radiusKm: 3390,
             parentId: null,
-            params: { gravity: 0.38, atmosphere: 1, hydrosphere: 0, baseTemp: -60, axialTilt: 25 },
+            params: { gravity: 0.38, worldSize: 0.5, atmosphere: 1, hydrosphere: 0, baseTemp: -60, axialTilt: 25 },
         },
         {
             id: 'phobos',
@@ -104,7 +104,7 @@ export const OUR_SOLAR_SYSTEM = {
             inclination: 1.1,
             radiusKm: 11,
             parentId: 'mars',
-            params: { gravity: 0.1, atmosphere: 0, hydrosphere: 0, baseTemp: -40, axialTilt: 0 },
+            params: { gravity: 0.1, worldSize: 0.1, atmosphere: 0, hydrosphere: 0, baseTemp: -40, axialTilt: 0 },
         },
         {
             id: 'deimos',
@@ -116,7 +116,7 @@ export const OUR_SOLAR_SYSTEM = {
             inclination: 0.9,
             radiusKm: 6,
             parentId: 'mars',
-            params: { gravity: 0.1, atmosphere: 0, hydrosphere: 0, baseTemp: -40, axialTilt: 0 },
+            params: { gravity: 0.1, worldSize: 0.1, atmosphere: 0, hydrosphere: 0, baseTemp: -40, axialTilt: 0 },
         },
         {
             id: 'asteroid_belt',
@@ -263,30 +263,56 @@ export function generateSystem(seed) {
     }
 
     for (let i = 0; i < numRocky; i++) {
-        const au    = rockyAUs[i];
-        const atm   = Math.floor(rng() * 6);
-        const hydro = au < 0.8 || au > 2.5 ? Math.floor(rng() * 2) : Math.floor(rng() * 5);
-        const grav  = parseFloat((0.1 + rng() * 2.9).toFixed(2));
-        const tilt  = Math.floor(rng() * 80);
+        const au       = rockyAUs[i];
+        const atm      = Math.floor(rng() * 6);
+        const hydro    = au < 0.8 || au > 2.5 ? Math.floor(rng() * 2) : Math.floor(rng() * 5);
+        const grav     = parseFloat((0.1 + rng() * 2.9).toFixed(2));
+        const tilt     = Math.floor(rng() * 80);
         const baseTemp = equilibriumTemp(star.lum, au, atm);
-        const period = 365.25 * Math.pow(au / 1.0, 1.5) * Math.pow(1.0 / 1.0, 0.5);
-        const ecc  = parseFloat((rng() * 0.2).toFixed(3));
+        const period   = 365.25 * Math.pow(au / 1.0, 1.5) * Math.pow(1.0 / 1.0, 0.5);
+        const ecc      = parseFloat((rng() * 0.2).toFixed(3));
+        const radiusKm = Math.round(2000 + rng() * 8000);
+        const bodyId   = `planet_${i + 1}`;
+        const bodyName = `Planet ${romanNumeral(i + 1)}`;
+        const ws       = parseFloat(Math.max(0.1, Math.min(3.0, radiusKm / 6371)).toFixed(1));
 
         // Classify as icy if very cold
         const type = baseTemp < -80 ? 'icy' : 'rocky';
 
         bodies.push({
-            id: `planet_${i + 1}`,
-            name: `Planet ${romanNumeral(i + 1)}`,
+            id:               bodyId,
+            name:             bodyName,
             type,
-            orbitRadiusAU: au,
+            orbitRadiusAU:    au,
             orbitalPeriodDays: Math.round(period * 10) / 10,
-            eccentricity: ecc,
-            inclination: parseFloat((rng() * 8).toFixed(1)),
-            radiusKm: Math.round(2000 + rng() * 8000),
-            parentId: null,
-            params: { gravity: grav, atmosphere: atm, hydrosphere: hydro, baseTemp, axialTilt: tilt },
+            eccentricity:     ecc,
+            inclination:      parseFloat((rng() * 8).toFixed(1)),
+            radiusKm,
+            parentId:         null,
+            params:           { gravity: grav, worldSize: ws, atmosphere: atm, hydrosphere: hydro, baseTemp, axialTilt: tilt },
         });
+
+        // Generate 0–2 moons per rocky planet
+        const numMoons = Math.floor(rng() * 3);
+        for (let m = 0; m < numMoons; m++) {
+            const moonRkm  = Math.round(200 + rng() * Math.min(radiusKm * 0.4, 2000));
+            const moonWS   = parseFloat(Math.max(0.1, Math.min(1.0, moonRkm / 6371)).toFixed(1));
+            const moonGrav = parseFloat(Math.max(0.1, Math.min(1.0, moonWS * (0.7 + rng() * 0.5))).toFixed(2));
+            const moonAtm  = rng() < 0.08 ? 1 : 0;
+            const moonTemp = Math.round(baseTemp + (rng() - 0.5) * 20);
+            bodies.push({
+                id:               `${bodyId}_moon_${m + 1}`,
+                name:             `${bodyName} ${['\u03b1', '\u03b2', '\u03b3'][m]}`,
+                type:             'rocky',
+                orbitRadiusAU:    0,
+                orbitalPeriodDays: parseFloat((1 + rng() * 40).toFixed(1)),
+                eccentricity:     parseFloat((rng() * 0.1).toFixed(3)),
+                inclination:      parseFloat((rng() * 15).toFixed(1)),
+                radiusKm:         moonRkm,
+                parentId:         bodyId,
+                params:           { gravity: moonGrav, worldSize: moonWS, atmosphere: moonAtm, hydrosphere: 0, baseTemp: moonTemp, axialTilt: Math.floor(rng() * 20) },
+            });
+        }
     }
 
     // Optional asteroid belt between last rocky and first gas
@@ -329,12 +355,24 @@ export function generateSystem(seed) {
         }
     }
 
-    // Sort by orbital radius
-    bodies.sort((a, b) => a.orbitRadiusAU - b.orbitRadiusAU);
+    // Sort non-moon bodies by orbital radius, then insert moons after their parent
+    bodies.sort((a, b) => {
+        if (a.parentId && !b.parentId) return 1;
+        if (!a.parentId && b.parentId) return -1;
+        return a.orbitRadiusAU - b.orbitRadiusAU;
+    });
+    const finalBodies = [];
+    for (const b of bodies) { if (!b.parentId) finalBodies.push(b); }
+    for (const b of bodies) {
+        if (b.parentId) {
+            const pIdx = finalBodies.findIndex(s => s.id === b.parentId);
+            if (pIdx >= 0) finalBodies.splice(pIdx + 1, 0, b);
+        }
+    }
 
     const systemName = generateSystemName(rng);
 
-    return { name: systemName, seed, star, bodies };
+    return { name: systemName, seed, star, bodies: finalBodies };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

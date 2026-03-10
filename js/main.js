@@ -5,7 +5,9 @@ import { renderer, scene, camera, ctrl, waterMesh, atmosMesh, starsMesh,
          mapCamera, updateMapCameraFrustum, mapCtrl, canvas,
          tickZoom, tickMapZoom,
          updateAtmosphereColor, updateWaterColor, updateHazeLayer,
-         orreryCamera, orreryCtrl, tickOrreryZoom, updateOrreryCameraFrustum } from './render/scene.js';
+         orreryCamera, orreryCtrl, tickOrreryZoom, updateOrreryCameraFrustum,
+         tickMoonOrbits, updateMoonLabels,
+         startBodyTransition, tickBodyTransition } from './render/scene.js';
 import { state } from './core/state.js';
 import { generate, reapplyViaWorker, computePlanetaryDebugLayers } from './generate.js';
 import { encodePlanetCode, decodePlanetCode } from './world/planet-code.js';
@@ -26,7 +28,7 @@ import { initTutorial, initSurveyTracker } from './ui/modals.js';
 state.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 
 // Slider value displays + stale tracking
-const sliderIds = ['sN','sP','sCn','sJ','sNs','sGravity','sAtm','sHydro','sBaseTemp','sTilt'];
+const sliderIds = ['sN','sP','sCn','sJ','sNs','sGravity','sWorldSize','sAtm','sHydro','sBaseTemp','sTilt'];
 let lastGenValues = {};
 
 function snapshotSliders() {
@@ -39,7 +41,7 @@ function snapshotSliders() {
 function checkStale() {
     const btn = document.getElementById('generate');
     if (btn.classList.contains('generating')) return;
-    const plateSliders = ['sP', 'sCn', 'sGravity', 'sAtm', 'sHydro', 'sBaseTemp', 'sTilt'];
+    const plateSliders = ['sP', 'sCn', 'sGravity', 'sWorldSize', 'sAtm', 'sHydro', 'sBaseTemp', 'sTilt'];
     const detailSliders = ['sN', 'sJ', 'sNs'];
     const plateChanged = plateSliders.some(id => document.getElementById(id).value !== lastGenValues[id]);
     const detailChanged = detailSliders.some(id => document.getElementById(id).value !== lastGenValues[id]);
@@ -148,7 +150,7 @@ function initSliderTooltip(slider) {
     slider.addEventListener('pointercancel', hide);
 }
 
-for (const [s,v] of [['sN','vN'],['sP','vP'],['sCn','vCn'],['sJ','vJ'],['sNs','vNs'],['sTw','vTw'],['sS','vS'],['sGl','vGl'],['sHEr','vHEr'],['sTEr','vTEr'],['sRs','vRs'],['sGravity','vGravity'],['sAtm','vAtm'],['sHydro','vHydro'],['sBaseTemp','vBaseTemp'],['sTilt','vTilt']]) {
+for (const [s,v] of [['sN','vN'],['sP','vP'],['sCn','vCn'],['sJ','vJ'],['sNs','vNs'],['sTw','vTw'],['sS','vS'],['sGl','vGl'],['sHEr','vHEr'],['sTEr','vTEr'],['sRs','vRs'],['sGravity','vGravity'],['sWorldSize','vWorldSize'],['sAtm','vAtm'],['sHydro','vHydro'],['sBaseTemp','vBaseTemp'],['sTilt','vTilt']]) {
     const slider = document.getElementById(s);
     if (!slider) continue; // guard during incremental rollout
     initSliderTooltip(slider);
@@ -175,7 +177,7 @@ for (const [s,v] of [['sN','vN'],['sP','vP'],['sCn','vCn'],['sJ','vJ'],['sNs','v
         } else {
             checkStale();
         }
-        if (s === 'sGravity' || s === 'sAtm' || s === 'sHydro' || s === 'sBaseTemp' || s === 'sTilt') {
+        if (s === 'sGravity' || s === 'sWorldSize' || s === 'sAtm' || s === 'sHydro' || s === 'sBaseTemp' || s === 'sTilt') {
             const wp = document.getElementById('worldPreset');
             if (wp) wp.value = 'custom';
             state.currentPreset = 'custom';
@@ -284,7 +286,8 @@ function updatePlanetCode(flash) {
         +(document.getElementById('sAtm')?.value      ?? 3),
         +(document.getElementById('sHydro')?.value    ?? 3),
         +(document.getElementById('sBaseTemp')?.value  ?? 15),
-        +(document.getElementById('sTilt')?.value     ?? 23)
+        +(document.getElementById('sTilt')?.value     ?? 23),
+        +(document.getElementById('sWorldSize')?.value ?? 1.0)
     );
     currentCode = code;
     seedInput.value = code;
@@ -305,6 +308,7 @@ genBtn.addEventListener('generate-done', () => {
     // Update state.planetaryParams from current slider values
     state.planetaryParams = buildPlanetaryParams({
         gravity:     +(document.getElementById('sGravity')?.value  ?? 1.0),
+        worldSize:   +(document.getElementById('sWorldSize')?.value ?? 1.0),
         atmosphere:  +(document.getElementById('sAtm')?.value      ?? 3),
         hydrosphere: +(document.getElementById('sHydro')?.value    ?? 3),
         baseTemp:    +(document.getElementById('sBaseTemp')?.value  ?? 15),
@@ -403,9 +407,9 @@ function applyCode(code) {
         sTw: params.terrainWarp, sS: params.smoothing, sGl: params.glacialErosion,
         sHEr: params.hydraulicErosion, sTEr: params.thermalErosion, sRs: params.ridgeSharpening,
         sSc: params.soilCreep ?? 0.75,
-        sGravity: params.gravity ?? 1.0, sAtm: params.atmosphere ?? 3,
-        sHydro: params.hydrosphere ?? 3, sBaseTemp: params.baseTemp ?? 15,
-        sTilt: Math.round(params.axialTilt ?? 23),
+        sGravity: params.gravity ?? 1.0, sWorldSize: params.worldSize ?? 1.0,
+        sAtm: params.atmosphere ?? 3, sHydro: params.hydrosphere ?? 3,
+        sBaseTemp: params.baseTemp ?? 15, sTilt: Math.round(params.axialTilt ?? 23),
     };
     for (const [id, val] of Object.entries(map)) {
         const el = document.getElementById(id);
@@ -828,7 +832,10 @@ function animate() {
         tickMapZoom(); mapCtrl.update();
         renderer.render(scene, mapCamera);
     } else {
-        tickZoom(); ctrl.update();
+        const _inBodyTransition = tickBodyTransition(realDtSec);
+        if (!_inBodyTransition) { tickZoom(); ctrl.update(); }
+        tickMoonOrbits(realDtSec);
+        updateMoonLabels();
         if (state.planetMesh && document.getElementById('chkRotate').checked) {
             state.planetMesh.rotation.y += 0.0008;
             waterMesh.rotation.y = state.planetMesh.rotation.y;
@@ -912,9 +919,9 @@ if (hashParams) {
         sTw: hashParams.terrainWarp, sS: hashParams.smoothing, sGl: hashParams.glacialErosion,
         sHEr: hashParams.hydraulicErosion, sTEr: hashParams.thermalErosion, sRs: hashParams.ridgeSharpening,
         sSc: hashParams.soilCreep ?? 0.75,
-        sGravity: hashParams.gravity ?? 1.0, sAtm: hashParams.atmosphere ?? 3,
-        sHydro: hashParams.hydrosphere ?? 3, sBaseTemp: hashParams.baseTemp ?? 15,
-        sTilt: Math.round(hashParams.axialTilt ?? 23),
+        sGravity: hashParams.gravity ?? 1.0, sWorldSize: hashParams.worldSize ?? 1.0,
+        sAtm: hashParams.atmosphere ?? 3, sHydro: hashParams.hydrosphere ?? 3,
+        sBaseTemp: hashParams.baseTemp ?? 15, sTilt: Math.round(hashParams.axialTilt ?? 23),
     };
     for (const [id, val] of Object.entries(map)) {
         const el = document.getElementById(id);

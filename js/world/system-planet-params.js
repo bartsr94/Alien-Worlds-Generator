@@ -21,6 +21,7 @@ export function bodyParamsToSliderValues(bodyParams) {
     if (!bodyParams) return null;
     return {
         gravity:     clamp(bodyParams.gravity,     0.1, 3.0),
+        worldSize:   clamp(bodyParams.worldSize ?? 1.0, 0.1, 3.0),
         atmosphere:  clamp(Math.round(bodyParams.atmosphere),  0, 5),
         hydrosphere: clamp(Math.round(bodyParams.hydrosphere), 0, 5),
         baseTemp:    clamp(Math.round(bodyParams.baseTemp / 5) * 5, -150, 500),

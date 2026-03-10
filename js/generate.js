@@ -962,6 +962,7 @@ export function generate(overrideSeed, toggledIndices = [], onProgress, skipClim
     const ridgeSharpening = +document.getElementById('sRs').value;
     const glacialErosion = +document.getElementById('sGl').value;
     const gravity     = +(document.getElementById('sGravity')?.value  ?? 1.0);
+    const worldSize   = +(document.getElementById('sWorldSize')?.value ?? 1.0);
     const atmosphere  = +(document.getElementById('sAtm')?.value      ?? 3);
     const hydrosphere = +(document.getElementById('sHydro')?.value    ?? 3);
     const baseTemp    = +(document.getElementById('sBaseTemp')?.value  ?? 15);
@@ -971,7 +972,7 @@ export function generate(overrideSeed, toggledIndices = [], onProgress, skipClim
         cmd: 'generate',
         N, P, jitter, nMag, numContinents,
         terrainWarp, smoothing, hydraulicErosion, thermalErosion, ridgeSharpening, glacialErosion,
-        gravity, atmosphere, hydrosphere, baseTemp, axialTilt,
+        gravity, worldSize, atmosphere, hydrosphere, baseTemp, axialTilt,
         seed: overrideSeed,
         toggledIndices,
         skipClimate
@@ -996,6 +997,7 @@ export function reapplyViaWorker(onDone, skipClimate = false) {
         thermalErosion: +document.getElementById('sTEr').value,
         ridgeSharpening: +document.getElementById('sRs').value,
         gravity:     +(document.getElementById('sGravity')?.value  ?? 1.0),
+        worldSize:   +(document.getElementById('sWorldSize')?.value ?? 1.0),
         atmosphere:  +(document.getElementById('sAtm')?.value      ?? 3),
         hydrosphere: +(document.getElementById('sHydro')?.value    ?? 3),
         baseTemp:    +(document.getElementById('sBaseTemp')?.value  ?? 15),
@@ -1024,6 +1026,7 @@ export function editRecomputeViaWorker(onDone, skipClimate = false) {
         thermalErosion: +document.getElementById('sTEr').value,
         ridgeSharpening: +document.getElementById('sRs').value,
         gravity:     +(document.getElementById('sGravity')?.value  ?? 1.0),
+        worldSize:   +(document.getElementById('sWorldSize')?.value ?? 1.0),
         atmosphere:  +(document.getElementById('sAtm')?.value      ?? 3),
         hydrosphere: +(document.getElementById('sHydro')?.value    ?? 3),
         baseTemp:    +(document.getElementById('sBaseTemp')?.value  ?? 15),

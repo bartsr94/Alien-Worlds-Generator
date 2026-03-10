@@ -71,7 +71,7 @@ The three guiding principles, in tie-breaking order:
     │   ├── plates.js           Flood-fill plate growth + boundary classification
     │   ├── ocean-land.js       Ocean/continent assignment + land fraction targeting
     │   ├── elevation.js        Distance fields, stress uplift, all tectonic features
-    │   ├── terrain-post.js     Domain warping, bilateral smoothing, soil creep, hypsometric correction; re-exports erosion.js
+    ├── terrain-post.js     Domain warping, bilateral smoothing, soil creep, hypsometric correction (hydro-scaled ocean depth), sea level calibration (`calibrateSeaLevel`), ridge sharpening; re-exports erosion.js
     │   ├── erosion.js          Priority-flood pit carving + composite hydraulic/thermal/glacial erosion
     │   ├── impact-craters.js   Procedural crater generation for airless worlds
     │   ├── climate-util.js     Shared climate helpers: smoothstep, Laplacian smoothing, ITCZ lookup, percentile
@@ -263,7 +263,16 @@ generate.js posts 'computeClimate' ► Runs deferred climate on existing terrain
 
 **Fallback:** If module workers aren't supported (older Safari), `workerSupported = false` and all pipeline functions run synchronously on the main thread via `generateFallback()`.
 
-**Planetary inspection layers:** `computePlanetaryDebugLayers(curData, planetaryParams)` (exported from `generate.js`) computes `debugLayers.hydroState` and `debugLayers.habitability`. It runs **twice** per generation: a first pass in the `done` handler (while `state.planetaryParams` is still null, using `??` Earth-defaults), then definitively in the `generate-done` handler in `main.js` after `state.planetaryParams` is populated from slider values. This two-pass approach ensures alien worlds get correct habitability scores.
+**Planetary inspection layers:** `computePlanetaryDebugLayers(curData, planetaryParams)` (exported from `generate.js`) computes four arrays stored on `debugLayers`:
+
+| Array key | Type | Meaning |
+|-----------|------|---------|
+| `hydroState` | `Uint8Array` | 0=liquid ocean, 1=frozen ocean, 2=dry basin, 3=land |
+| `habitability` | `Float32Array` | 0–1 composite of temperature score × water score |
+| `permanentIce` | `Uint8Array` | 1 where summer temp < −10 °C (ice caps, land glaciers) |
+| `seasonalIce` | `Uint8Array` | 1 where winter temp < 0 °C but summer ≥ −10 °C (pack ice, seasonal snow) |
+
+The function runs **twice** per generation: a first pass in the `done` handler (while `state.planetaryParams` is still null, using `??` Earth-defaults), then definitively in the `generate-done` handler in `main.js` after `state.planetaryParams` is populated. `permanentIce` and `seasonalIce` are consumed by `makeColorizer` in `planet-mesh.js` to overlay ice colours on both Terrain and Satellite views.
 
 ---
 

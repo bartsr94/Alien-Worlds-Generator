@@ -2,15 +2,15 @@
 import { state } from '../core/state.js';
 
 export const WORLD_PRESETS = {
-    earth:    { gravity: 1.0, atm: 3, hydro: 3, baseTemp:   15, tilt: 23 },
-    arid:     { gravity: 1.0, atm: 2, hydro: 1, baseTemp:   40, tilt: 25 },
-    mars:     { gravity: 0.4, atm: 1, hydro: 0, baseTemp:  -60, tilt: 25 },
-    venus:    { gravity: 0.9, atm: 5, hydro: 0, baseTemp:  460, tilt:  3 },
-    ocean:    { gravity: 1.0, atm: 3, hydro: 5, baseTemp:   20, tilt: 20 },
-    highgrav: { gravity: 2.5, atm: 3, hydro: 3, baseTemp:   15, tilt: 23 },
-    iceball:  { gravity: 0.8, atm: 2, hydro: 2, baseTemp:  -80, tilt: 15 },
-    titan:    { gravity: 0.1, atm: 4, hydro: 2, baseTemp: -180, tilt: 27 },
-    deadrock: { gravity: 0.5, atm: 0, hydro: 0, baseTemp:    0, tilt: 10 },
+    earth:    { gravity: 1.0, worldSize: 1.0, atm: 3, hydro: 3, baseTemp:   15, tilt: 23 },
+    arid:     { gravity: 1.0, worldSize: 1.0, atm: 2, hydro: 1, baseTemp:   40, tilt: 25 },
+    mars:     { gravity: 0.4, worldSize: 0.5, atm: 1, hydro: 0, baseTemp:  -60, tilt: 25 },
+    venus:    { gravity: 0.9, worldSize: 1.0, atm: 5, hydro: 0, baseTemp:  460, tilt:  3 },
+    ocean:    { gravity: 1.0, worldSize: 1.0, atm: 3, hydro: 5, baseTemp:   20, tilt: 20 },
+    highgrav: { gravity: 2.5, worldSize: 2.0, atm: 3, hydro: 3, baseTemp:   15, tilt: 23 },
+    iceball:  { gravity: 0.8, worldSize: 0.8, atm: 2, hydro: 2, baseTemp:  -80, tilt: 15 },
+    titan:    { gravity: 0.1, worldSize: 0.4, atm: 4, hydro: 2, baseTemp: -180, tilt: 27 },
+    deadrock: { gravity: 0.5, worldSize: 0.3, atm: 0, hydro: 0, baseTemp:    0, tilt: 10 },
 };
 
 /** Show constraint warnings for implausible planetary parameter combinations. */
@@ -63,7 +63,7 @@ export function applyPreset(name) {
             return;
         }
     }
-    const map = { sGravity: p.gravity, sAtm: p.atm, sHydro: p.hydro, sBaseTemp: p.baseTemp, sTilt: p.tilt };
+    const map = { sGravity: p.gravity, sWorldSize: p.worldSize ?? 1.0, sAtm: p.atm, sHydro: p.hydro, sBaseTemp: p.baseTemp, sTilt: p.tilt };
     for (const [id, val] of Object.entries(map)) {
         const el = document.getElementById(id);
         if (!el) continue;

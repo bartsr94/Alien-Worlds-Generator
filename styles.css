@@ -1088,6 +1088,7 @@ button#generate.generating {
 .body-list-item.active { background: rgba(255,200,80,0.1); border-color: rgba(255,200,80,0.25); }
 .body-list-item.no-globe { cursor: default; opacity: 0.55; }
 .body-list-item.no-globe:hover { background: transparent; }
+.body-moon-item { padding-left: 24px; opacity: 0.85; font-size: 0.93em; }
 .body-dot {
     width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
 }
@@ -1243,6 +1244,27 @@ button#generate.generating {
     text-shadow: 0 1px 3px rgba(0,0,0,0.9);
     white-space: nowrap; pointer-events: none;
     transform: translateY(-50%);
+}
+.orrery-moon-label {
+    font-size: 9px; color: rgba(170,185,210,0.55);
+}
+
+/* Floating labels next to moon discs and parent disc in globe view */
+.moon-globe-label {
+    position: fixed;
+    color: rgba(210, 220, 240, 0.85);
+    font-size: 11px;
+    font-family: inherit;
+    pointer-events: none;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+    z-index: 5;
+    display: none;
+}
+.parent-globe-label {
+    color: rgba(160, 185, 230, 0.75);
+    font-size: 12px;
 }
 
 /* ── Collapsed sidebar: keep system button visible ── */

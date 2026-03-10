@@ -8,6 +8,8 @@ import {
     waterMesh, atmosMesh, starsMesh, canvas,
     updateAtmosphereColor, updateWaterColor, updateHazeLayer,
     switchToOrrery, switchToPlanetView,
+    updateMoonScene, updateParentScene,
+    startBodyTransition,
 } from './render/scene.js';
 import {
     setUpliftMult, setHasLiquidOcean, setBaseTemp, setAtmosphere, setHydrosphere,
@@ -56,7 +58,8 @@ export function initSolarSystem({ onProgress, shouldSkipClimate, switchPanel, sh
         const sv = bodyParamsToSliderValues(params);
         if (!sv) return;
         const map = {
-            sGravity: sv.gravity, sAtm: sv.atmosphere, sHydro: sv.hydrosphere,
+            sGravity: sv.gravity, sWorldSize: sv.worldSize,
+            sAtm: sv.atmosphere, sHydro: sv.hydrosphere,
             sBaseTemp: sv.baseTemp, sTilt: sv.axialTilt,
         };
         for (const [id, val] of Object.entries(map)) {
@@ -83,10 +86,10 @@ export function initSolarSystem({ onProgress, shouldSkipClimate, switchPanel, sh
         if (!bodyListEl || !state.currentSystem) return;
         bodyListEl.innerHTML = '';
         for (const body of state.currentSystem.bodies) {
-            if (body.parentId) continue; // hide moons in sidebar for now
             const canEnter = body.params !== null;
+            const isMoon   = !!body.parentId;
             const item = document.createElement('div');
-            item.className = 'body-list-item' + (canEnter ? '' : ' no-globe');
+            item.className = 'body-list-item' + (canEnter ? '' : ' no-globe') + (isMoon ? ' body-moon-item' : '');
             if (body.id === state.activeBodyId) item.classList.add('active');
 
             const dot = document.createElement('span');
@@ -99,7 +102,7 @@ export function initSolarSystem({ onProgress, shouldSkipClimate, switchPanel, sh
 
             const type = document.createElement('span');
             type.className = 'body-item-type';
-            type.textContent = TYPE_LABELS[body.type] ?? body.type;
+            type.textContent = isMoon ? 'Moon' : (TYPE_LABELS[body.type] ?? body.type);
 
             const status = document.createElement('span');
             status.className = 'body-status';
@@ -241,6 +244,7 @@ export function initSolarSystem({ onProgress, shouldSkipClimate, switchPanel, sh
         // Exit orrery view → planet view; show full planet controls in sidebar
         exitOrrery();
         switchToPlanetView();
+        startBodyTransition(); // camera fly-in from far space
         state.solarSystemMode = false;
 
         // Switch sidebar to World panel
@@ -265,6 +269,7 @@ export function initSolarSystem({ onProgress, shouldSkipClimate, switchPanel, sh
             // Re-apply planetary params module state
             state.planetaryParams = buildPlanetaryParams({
                 gravity: +(document.getElementById('sGravity')?.value ?? 1.0),
+                worldSize: +(document.getElementById('sWorldSize')?.value ?? 1.0),
                 atmosphere: +(document.getElementById('sAtm')?.value ?? 3),
                 hydrosphere: +(document.getElementById('sHydro')?.value ?? 3),
                 baseTemp: +(document.getElementById('sBaseTemp')?.value ?? 15),
@@ -281,6 +286,8 @@ export function initSolarSystem({ onProgress, shouldSkipClimate, switchPanel, sh
             setHydrosphere(state.planetaryParams.hydrosphere);
             buildMesh();
             updateMeshColors();
+            updateMoonScene(body, state.currentSystem.bodies);
+            updateParentScene(body, state.currentSystem.bodies);
             _pendingBodyId = null;
             renderBodyList();
             return;
@@ -327,6 +334,8 @@ export function initSolarSystem({ onProgress, shouldSkipClimate, switchPanel, sh
         starsMesh.visible = false;
         if (state.wireMesh) state.wireMesh.visible = false;
         updateHazeLayer(0, null);
+        updateMoonScene(null, null);
+        updateParentScene(null, null);
 
         switchToOrrery();
         enterOrrery();
@@ -518,6 +527,12 @@ export function initSolarSystem({ onProgress, shouldSkipClimate, switchPanel, sh
             }
 
             _pendingBodyId = null;
+            // Update moon/parent-disc meshes for the newly-rendered body
+            const justRendered = sys?.bodies.find(b => b.id === bodyId);
+            if (justRendered) {
+                updateMoonScene(justRendered, state.currentSystem.bodies);
+                updateParentScene(justRendered, state.currentSystem.bodies);
+            }
             renderBodyList();
             renderSavedSystemsList();
         }
@@ -661,4 +676,6 @@ export function initSolarSystem({ onProgress, shouldSkipClimate, switchPanel, sh
     };
     // Expose enterSystemMode at module level for the page-load restore code
     window._enterSystemMode = enterSystemMode;
+    // Expose enterBody so edit-mode.js can navigate to a moon or parent on click
+    window._enterBodyFromClick = (bodyId) => enterBody(bodyId);
 }

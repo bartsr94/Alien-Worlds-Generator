@@ -105,6 +105,50 @@ function runPostProcessing(mesh, r_xyz, r_elevation, params, neighborDist, seed,
         timing.push({ stage: 'Soil creep (3 iters)', ms: performance.now() - t0 });
     }
 
+    // Regolith gardening — on airless and thin-atmosphere worlds, aeons of
+    // micrometeorite impacts churn and flatten surface material, rounding off
+    // ancient tectonic mountains. Scales with how airless and how small the
+    // world is (small gravity means ejecta blankets reach farther).
+    // Craters are stamped AFTER this, so fresh impacts remain sharp.
+    {
+        const regolithFactor = Math.max(0, 1 - atmLevel / 2); // atm=0→1.0, atm=1→0.5, atm≥2→0
+        if (regolithFactor > 0) {
+            const ws = planetaryParams?.worldSize ?? 1.0;
+            // Smaller worlds: ejecta blankets cover proportionally more surface
+            const sizeFactor = Math.min(1.5, 1.0 / Math.max(0.5, ws));
+            const extraIters = Math.round(3 * regolithFactor * sizeFactor);
+            if (extraIters >= 1) {
+                const t0 = performance.now();
+                applySoilCreep(mesh, r_elevation, r_isOcean, extraIters, 0.22);
+                timing.push({ stage: `Regolith gardening (${extraIters} iters)`, ms: performance.now() - t0 });
+            }
+        }
+    }
+
+    // Tectonic relief suppression — for tiny airless worlds, plate-tectonic
+    // mountain chains look wrong; the surface should be a rubble pile where
+    // ALL relief comes from crater rims.  We compress elevation deviations
+    // toward the mean so craters (stamped next) become the dominant topography.
+    // Earth (ws≥0.4) and any world with atmosphere are unaffected.
+    {
+        const ws = planetaryParams?.worldSize ?? 1.0;
+        // suppressFactor: 0 at ws=0.4, ~0.85 at ws=0.1 (linear ramp, airless only)
+        const suppressFactor = atmLevel === 0
+            ? Math.max(0, Math.min(0.85, (0.4 - ws) / 0.3))
+            : 0;
+        if (suppressFactor > 0) {
+            const N = mesh.numRegions;
+            let mean = 0;
+            for (let r = 0; r < N; r++) mean += r_elevation[r];
+            mean /= N;
+            for (let r = 0; r < N; r++) {
+                r_elevation[r] = mean + (r_elevation[r] - mean) * (1 - suppressFactor);
+            }
+            const t0 = performance.now();
+            timing.push({ stage: `Tectonic relief suppression (ws=${ws.toFixed(2)}, f=${suppressFactor.toFixed(2)})`, ms: performance.now() - t0 });
+        }
+    }
+
     {
         const t0 = performance.now();
         applyHypsometricCorrection(mesh, r_elevation, r_isOcean, planetaryParams?.hydrosphere ?? 3);
@@ -177,6 +221,7 @@ function handleGenerate(data) {
     // Build planetary physics params from slider values (or Earth defaults).
     const planetaryParams = buildPlanetaryParams({
         gravity:     data.gravity     ?? 1.0,
+        worldSize:   data.worldSize   ?? 1.0,
         atmosphere:  data.atmosphere  ?? 3,
         hydrosphere: data.hydrosphere ?? 3,
         baseTemp:    data.baseTemp    ?? 15,
