@@ -22,33 +22,53 @@ import { buildPlanetaryParams, ATM_LABELS, HYDRO_LABELS } from './world/planetar
 import { OUR_SOLAR_SYSTEM, generateSystem } from './world/solar-system.js';
 import { loadRegistry } from './world/system-storage.js';
 import { initSolarSystem } from './solar-ui.js';
-import { CLIMATE_LAYERS, switchVisualization, syncTabsToLayer, updateLegend, onProgress, showBuildOverlay, hideBuildOverlay, debugLayerEl } from './viz-controls.js';
+import { CLIMATE_LAYERS, switchVisualization, syncTabsToLayer, updateLegend, onProgress, showBuildOverlay, hideBuildOverlay, debugLayerEl, isWindLayer, isOceanLayer } from './viz-controls.js';
 import { WORLD_PRESETS, applyPreset, updatePlanetWarnings } from './ui/world-preset.js';
 import { initExportModal } from './ui/export-modal.js';
 import { initTutorial, initSurveyTracker } from './ui/modals.js';
 import { getGameDays, tickClock, getGameDate, isPaused, togglePause } from './game-clock.js';
 import { STARTING_POOL, colonyProductionRates, maintenanceCost, getTier as getColonyTier, getHousingCap, getStorageContribution } from './colony.js';
+import { formatNumber, formatPop } from './core/format.js';
 
 state.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 
-// Slider value displays + stale tracking
-const sliderIds = ['sN','sP','sCn','sJ','sNs','sGravity','sWorldSize','sAtm','sHydro','sBaseTemp','sTilt'];
+// Slider registry — single source of truth for all 18 sliders
+const SLIDERS = [
+    { id:'sN',         valueId:'vN',         category:'detail',      paramsKey:'N',            toSlider: p => sliderFromDetail(p), format: v => detailFromSlider(+v).toLocaleString(), onInput: v => updateDetailWarning(detailFromSlider(+v)) },
+    { id:'sJ',         valueId:'vJ',         category:'detail',      paramsKey:'jitter' },
+    { id:'sP',         valueId:'vP',         category:'plate',       paramsKey:'P' },
+    { id:'sCn',        valueId:'vCn',        category:'plate',       paramsKey:'numContinents' },
+    { id:'sNs',        valueId:'vNs',        category:'detail',      paramsKey:'roughness' },
+    { id:'sTw',        valueId:'vTw',        category:'postprocess', paramsKey:'terrainWarp' },
+    { id:'sS',         valueId:'vS',         category:'postprocess', paramsKey:'smoothing' },
+    { id:'sGl',        valueId:'vGl',        category:'postprocess', paramsKey:'glacialErosion' },
+    { id:'sHEr',       valueId:'vHEr',       category:'postprocess', paramsKey:'hydraulicErosion' },
+    { id:'sTEr',       valueId:'vTEr',       category:'postprocess', paramsKey:'thermalErosion' },
+    { id:'sRs',        valueId:'vRs',        category:'postprocess', paramsKey:'ridgeSharpening' },
+    { id:'sSc',        valueId: null,        category:'postprocess', paramsKey:'soilCreep',     default: 0.75 },
+    { id:'sGravity',   valueId:'vGravity',   category:'physics',     paramsKey:'gravity',       default: 1.0 },
+    { id:'sWorldSize', valueId:'vWorldSize', category:'physics',     paramsKey:'worldSize',     default: 1.0 },
+    { id:'sAtm',       valueId:'vAtm',       category:'physics',     paramsKey:'atmosphere',    default: 3,  format: v => ATM_LABELS[+v] ?? v },
+    { id:'sHydro',     valueId:'vHydro',     category:'physics',     paramsKey:'hydrosphere',   default: 3,  format: v => HYDRO_LABELS[+v] ?? v },
+    { id:'sBaseTemp',  valueId:'vBaseTemp',  category:'physics',     paramsKey:'baseTemp',      default: 15, format: v => `${+v > 0 ? '+' : ''}${v}°C` },
+    { id:'sTilt',      valueId:'vTilt',      category:'physics',     paramsKey:'axialTilt',     default: 23, toSlider: p => Math.round(p), format: v => `${v}°` },
+];
 let lastGenValues = {};
 
 function snapshotSliders() {
-    for (const id of sliderIds) {
-        const el = document.getElementById(id);
-        if (el) lastGenValues[id] = el.value;
+    for (const s of SLIDERS) {
+        const el = document.getElementById(s.id);
+        if (el) lastGenValues[s.id] = el.value;
     }
 }
 
 function checkStale() {
     const btn = document.getElementById('generate');
     if (btn.classList.contains('generating')) return;
-    const plateSliders = ['sP', 'sCn', 'sGravity', 'sWorldSize', 'sAtm', 'sHydro', 'sBaseTemp', 'sTilt'];
-    const detailSliders = ['sN', 'sJ', 'sNs'];
-    const plateChanged = plateSliders.some(id => document.getElementById(id).value !== lastGenValues[id]);
-    const detailChanged = detailSliders.some(id => document.getElementById(id).value !== lastGenValues[id]);
+    const plateChanged  = SLIDERS.filter(s => s.category === 'plate' || s.category === 'physics')
+        .some(s => document.getElementById(s.id)?.value !== lastGenValues[s.id]);
+    const detailChanged = SLIDERS.filter(s => s.category === 'detail')
+        .some(s => document.getElementById(s.id)?.value !== lastGenValues[s.id]);
     btn.classList.remove('stale', 'regen');
     if (plateChanged) {
         btn.classList.add('regen');
@@ -154,34 +174,22 @@ function initSliderTooltip(slider) {
     slider.addEventListener('pointercancel', hide);
 }
 
-for (const [s,v] of [['sN','vN'],['sP','vP'],['sCn','vCn'],['sJ','vJ'],['sNs','vNs'],['sTw','vTw'],['sS','vS'],['sGl','vGl'],['sHEr','vHEr'],['sTEr','vTEr'],['sRs','vRs'],['sGravity','vGravity'],['sWorldSize','vWorldSize'],['sAtm','vAtm'],['sHydro','vHydro'],['sBaseTemp','vBaseTemp'],['sTilt','vTilt']]) {
-    const slider = document.getElementById(s);
-    if (!slider) continue; // guard during incremental rollout
+for (const s of SLIDERS) {
+    const slider = document.getElementById(s.id);
+    if (!slider) continue;
     initSliderTooltip(slider);
     slider.addEventListener('input', e => {
         const val = e.target.value;
-        const num = +val;
-        if (s === 'sN') {
-            const detail = detailFromSlider(num);
-            document.getElementById(v).textContent = detail.toLocaleString();
-            updateDetailWarning(detail);
-        } else if (s === 'sAtm') {
-            document.getElementById(v).textContent = ATM_LABELS[num] ?? val;
-        } else if (s === 'sHydro') {
-            document.getElementById(v).textContent = HYDRO_LABELS[num] ?? val;
-        } else if (s === 'sBaseTemp') {
-            document.getElementById(v).textContent = `${num > 0 ? '+' : ''}${num}°C`;
-        } else if (s === 'sTilt') {
-            document.getElementById(v).textContent = `${num}°`;
-        } else {
-            document.getElementById(v).textContent = val;
+        if (s.valueId) {
+            document.getElementById(s.valueId).textContent = s.format ? s.format(val) : val;
         }
-        if (s === 'sTw' || s === 'sS' || s === 'sGl' || s === 'sHEr' || s === 'sTEr' || s === 'sRs') {
+        s.onInput?.(val);
+        if (s.category === 'postprocess') {
             markReapplyPending();
         } else {
             checkStale();
         }
-        if (s === 'sGravity' || s === 'sWorldSize' || s === 'sAtm' || s === 'sHydro' || s === 'sBaseTemp' || s === 'sTilt') {
+        if (s.category === 'physics') {
             const wp = document.getElementById('worldPreset');
             if (wp) wp.value = 'custom';
             state.currentPreset = 'custom';
@@ -283,31 +291,35 @@ function getToggledIndices() {
     return indices;
 }
 
+function getSliderVal(id, def) {
+    return +(document.getElementById(id)?.value ?? def);
+}
+
 /** Encode current planet state and update the seed input + URL hash. */
 function updatePlanetCode(flash) {
     const d = state.curData;
     if (!d) return;
     const code = encodePlanetCode(
         d.seed,
-        detailFromSlider(+document.getElementById('sN').value),
-        +document.getElementById('sJ').value,
-        +document.getElementById('sP').value,
-        +document.getElementById('sCn').value,
-        +document.getElementById('sNs').value,
-        +document.getElementById('sTw').value,
-        +document.getElementById('sS').value,
-        +document.getElementById('sGl').value,
-        +document.getElementById('sHEr').value,
-        +document.getElementById('sTEr').value,
-        +document.getElementById('sRs').value,
-        +(document.getElementById('sSc')?.value ?? 0.75),
+        detailFromSlider(getSliderVal('sN', 50)),
+        getSliderVal('sJ', 0.5),
+        getSliderVal('sP', 10),
+        getSliderVal('sCn', 4),
+        getSliderVal('sNs', 0.5),
+        getSliderVal('sTw', 0),
+        getSliderVal('sS', 3),
+        getSliderVal('sGl', 0),
+        getSliderVal('sHEr', 0),
+        getSliderVal('sTEr', 0),
+        getSliderVal('sRs', 0),
+        getSliderVal('sSc', 0.75),
         getToggledIndices(),
-        +(document.getElementById('sGravity')?.value  ?? 1.0),
-        +(document.getElementById('sAtm')?.value      ?? 3),
-        +(document.getElementById('sHydro')?.value    ?? 3),
-        +(document.getElementById('sBaseTemp')?.value  ?? 15),
-        +(document.getElementById('sTilt')?.value     ?? 23),
-        +(document.getElementById('sWorldSize')?.value ?? 1.0)
+        getSliderVal('sGravity', 1.0),
+        getSliderVal('sAtm', 3),
+        getSliderVal('sHydro', 3),
+        getSliderVal('sBaseTemp', 15),
+        getSliderVal('sTilt', 23),
+        getSliderVal('sWorldSize', 1.0)
     );
     currentCode = code;
     seedInput.value = code;
@@ -326,14 +338,13 @@ genBtn.addEventListener('generate-done', () => {
 genBtn.addEventListener('generate-done', () => {
     if (state.isBgGenerating || state.currentSystem) return; // solar system body — skip standalone visual updates
     // Update state.planetaryParams from current slider values
+    const physicsVals = {};
+    for (const s of SLIDERS.filter(s => s.category === 'physics')) {
+        physicsVals[s.paramsKey] = getSliderVal(s.id, s.default ?? 0);
+    }
     state.planetaryParams = buildPlanetaryParams({
-        gravity:     +(document.getElementById('sGravity')?.value  ?? 1.0),
-        worldSize:   +(document.getElementById('sWorldSize')?.value ?? 1.0),
-        atmosphere:  +(document.getElementById('sAtm')?.value      ?? 3),
-        hydrosphere: +(document.getElementById('sHydro')?.value    ?? 3),
-        baseTemp:    +(document.getElementById('sBaseTemp')?.value  ?? 15),
-        axialTilt:   +(document.getElementById('sTilt')?.value     ?? 23),
-        preset:      document.getElementById('worldPreset')?.value ?? 'custom',
+        ...physicsVals,
+        preset: document.getElementById('worldPreset')?.value ?? 'custom',
     });
     // Update atmosphere rim glow and water sphere appearance
     updateAtmosphereColor(state.planetaryParams.atmosphereRimColor);
@@ -374,12 +385,9 @@ genBtn.addEventListener('generate-done', () => {
 
     // Rebuild wind/ocean arrows if a relevant debug layer is active
     const v = state.debugLayer;
-    const isWindLayer = v === 'pressureSummer' || v === 'pressureWinter' ||
-                        v === 'windSpeedSummer' || v === 'windSpeedWinter';
-    const isOceanLayer = v === 'oceanCurrentSummer' || v === 'oceanCurrentWinter';
-    if (isWindLayer) {
+    if (isWindLayer(v)) {
         buildWindArrows(v.includes('Winter') ? 'winter' : 'summer');
-    } else if (isOceanLayer) {
+    } else if (isOceanLayer(v)) {
         buildOceanCurrentArrows(v.includes('Winter') ? 'winter' : 'summer');
     }
 });
@@ -411,6 +419,16 @@ seedInput.addEventListener('input', () => {
 
 const seedError = document.getElementById('seedError');
 
+function applySliderParams(params) {
+    for (const s of SLIDERS) {
+        const raw = params[s.paramsKey];
+        if (raw == null && s.default == null) continue;
+        const val = s.toSlider ? s.toSlider(raw ?? s.default) : (raw ?? s.default);
+        const el = document.getElementById(s.id);
+        if (el) { el.value = val; el.dispatchEvent(new Event('input')); }
+    }
+}
+
 function applyCode(code) {
     const params = decodePlanetCode(code);
     if (!params) {
@@ -420,23 +438,7 @@ function applyCode(code) {
         return;
     }
     seedError.classList.remove('visible');
-    // Set slider values + fire input events to update displays
-    const map = {
-        sN: sliderFromDetail(params.N), sJ: params.jitter, sP: params.P,
-        sCn: params.numContinents, sNs: params.roughness,
-        sTw: params.terrainWarp, sS: params.smoothing, sGl: params.glacialErosion,
-        sHEr: params.hydraulicErosion, sTEr: params.thermalErosion, sRs: params.ridgeSharpening,
-        sSc: params.soilCreep ?? 0.75,
-        sGravity: params.gravity ?? 1.0, sWorldSize: params.worldSize ?? 1.0,
-        sAtm: params.atmosphere ?? 3, sHydro: params.hydrosphere ?? 3,
-        sBaseTemp: params.baseTemp ?? 15, sTilt: Math.round(params.axialTilt ?? 23),
-    };
-    for (const [id, val] of Object.entries(map)) {
-        const el = document.getElementById(id);
-        if (!el) continue;
-        el.value = val;
-        el.dispatchEvent(new Event('input'));
-    }
+    applySliderParams(params);
     clearReapplyPending();
     showBuildOverlay();
     generate(params.seed, params.toggledIndices, onProgress, shouldSkipClimate());
@@ -516,11 +518,8 @@ sMapCenterLon.addEventListener('change', () => {
         buildMapMesh();
         // Rebuild arrows if a wind/ocean layer is active
         const layer = state.debugLayer;
-        const isWind = layer === 'pressureSummer' || layer === 'pressureWinter' ||
-                       layer === 'windSpeedSummer' || layer === 'windSpeedWinter';
-        const isOcean = layer === 'oceanCurrentSummer' || layer === 'oceanCurrentWinter';
-        if (isWind) buildWindArrows(layer.includes('Winter') ? 'winter' : 'summer');
-        if (isOcean) buildOceanCurrentArrows(layer.includes('Winter') ? 'winter' : 'summer');
+        if (isWindLayer(layer)) buildWindArrows(layer.includes('Winter') ? 'winter' : 'summer');
+        if (isOceanLayer(layer)) buildOceanCurrentArrows(layer.includes('Winter') ? 'winter' : 'summer');
     }
 });
 
@@ -853,15 +852,11 @@ function updateHUD() {
     }
     panel.classList.remove('hidden');
 
-    const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M'
-                   : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K'
-                   : Math.round(n).toLocaleString();
+    const fmt = formatNumber;
     const fmtNet = n => (n >= 0 ? '+' : '') + Math.round(n).toLocaleString();
 
     const poolMax = pool ? calcBodyPoolMax(bodyId) : 0;
-    const capFmt  = poolMax >= 1e6 ? (poolMax / 1e6).toFixed(1) + 'M'
-                  : poolMax >= 1e3 ? (poolMax / 1e3).toFixed(1) + 'K'
-                  : Math.round(poolMax).toLocaleString();
+    const capFmt  = formatNumber(poolMax);
     const nearCap = pool && [
         pool.food, pool.water, pool.metals, pool.fuel
     ].some(v => v >= poolMax * 0.85);
@@ -903,9 +898,7 @@ function updateHUD() {
         const rates = colonyProductionRates(c, _getCurDataFor(c));
         const maint = maintenanceCost(c);
         const tier  = getColonyTier(c);
-        const pop   = c.population >= 1e6 ? (c.population / 1e6).toFixed(2) + 'M'
-                    : c.population >= 1e3 ? Math.round(c.population / 1e3) + 'K'
-                    : c.population.toLocaleString();
+        const pop   = formatPop(c.population);
         const inBootstrap = now < c.bootstrapEndDay;
         let statusHTML = '';
         if (inBootstrap) {
@@ -1243,22 +1236,7 @@ const hashCode = location.hash.replace(/^#/, '').trim();
 const hashParams = hashCode ? decodePlanetCode(hashCode) : null;
 if (hashParams) {
     // URL hash is a valid standalone planet code — load it, skip system restore
-    const map = {
-        sN: sliderFromDetail(hashParams.N), sJ: hashParams.jitter,
-        sP: hashParams.P, sCn: hashParams.numContinents, sNs: hashParams.roughness,
-        sTw: hashParams.terrainWarp, sS: hashParams.smoothing, sGl: hashParams.glacialErosion,
-        sHEr: hashParams.hydraulicErosion, sTEr: hashParams.thermalErosion, sRs: hashParams.ridgeSharpening,
-        sSc: hashParams.soilCreep ?? 0.75,
-        sGravity: hashParams.gravity ?? 1.0, sWorldSize: hashParams.worldSize ?? 1.0,
-        sAtm: hashParams.atmosphere ?? 3, sHydro: hashParams.hydrosphere ?? 3,
-        sBaseTemp: hashParams.baseTemp ?? 15, sTilt: Math.round(hashParams.axialTilt ?? 23),
-    };
-    for (const [id, val] of Object.entries(map)) {
-        const el = document.getElementById(id);
-        if (!el) continue;
-        el.value = val;
-        el.dispatchEvent(new Event('input'));
-    }
+    applySliderParams(hashParams);
     generate(hashParams.seed, hashParams.toggledIndices, onProgress, shouldSkipClimate());
 } else {
     // ── Auto-restore last active system from localStorage ─────────────────

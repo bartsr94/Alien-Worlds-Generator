@@ -90,6 +90,21 @@ function parseBase36(str) {
 }
 
 /**
+ * Unpack a mixed-radix BigInt into indices (low→high significance).
+ * Returns an array of `radices.length` indices followed by the remaining seed.
+ */
+function unpackBigInt(packed, radices) {
+    const out = [];
+    for (const r of radices) {
+        const big = BigInt(r);
+        out.push(Number(packed % big));
+        packed = packed / big;
+    }
+    out.push(Number(packed)); // remaining quotient is the seed
+    return out;
+}
+
+/**
  * Encode planet parameters into a base36 planet code.
  * @param {number} seed - Integer seed 0–16777215
  * @param {number} N - Detail (5000–2560000, step 1000)
@@ -185,6 +200,18 @@ function earthPhysicsDefaults() {
     };
 }
 
+/** Parse the toggle-suffix string into a validated array of plate indices, or null on bad input. */
+function parseToggledIndices(toggleStr, P) {
+    if (!toggleStr) return [];
+    const indices = [];
+    for (let i = 0; i < toggleStr.length; i += IDX_CHARS) {
+        const idx = parseInt(toggleStr.slice(i, i + IDX_CHARS), 36);
+        if (isNaN(idx) || idx >= P) return null;
+        indices.push(idx);
+    }
+    return indices;
+}
+
 /**
  * Decode a base36 planet code back into planet parameters.
  * Supports 23-char (current), 18-char (prev4), 17-char (prev3),
@@ -223,28 +250,7 @@ export function decodePlanetCode(code) {
 
     if (isLegacy) {
         // Legacy 13-char decode: single erosion slider
-        const erIdx = Number(packed % BigInt(LEGACY_RADICES[0]));
-        packed = packed / BigInt(LEGACY_RADICES[0]);
-
-        const smIdx = Number(packed % BigInt(LEGACY_RADICES[1]));
-        packed = packed / BigInt(LEGACY_RADICES[1]);
-
-        const nsIdx = Number(packed % BigInt(LEGACY_RADICES[2]));
-        packed = packed / BigInt(LEGACY_RADICES[2]);
-
-        const cnIdx = Number(packed % BigInt(LEGACY_RADICES[3]));
-        packed = packed / BigInt(LEGACY_RADICES[3]);
-
-        const pIdx = Number(packed % BigInt(LEGACY_RADICES[4]));
-        packed = packed / BigInt(LEGACY_RADICES[4]);
-
-        const jIdx = Number(packed % BigInt(LEGACY_RADICES[5]));
-        packed = packed / BigInt(LEGACY_RADICES[5]);
-
-        const nIdx = Number(packed % BigInt(LEGACY_RADICES[6]));
-        packed = packed / BigInt(LEGACY_RADICES[6]);
-
-        const seed = Number(packed);
+        const [erIdx, smIdx, nsIdx, cnIdx, pIdx, jIdx, nIdx, seed] = unpackBigInt(packed, LEGACY_RADICES);
 
         if (seed < 0 || seed >= SEED_MAX) return null;
         if (nIdx >= SLIDERS[0].count || jIdx >= SLIDERS[1].count ||
@@ -254,14 +260,8 @@ export function decodePlanetCode(code) {
 
         const P = fromIndex(pIdx, SLIDERS[2]);
 
-        const toggledIndices = [];
-        if (toggleStr) {
-            for (let i = 0; i < toggleStr.length; i += IDX_CHARS) {
-                const idx = parseInt(toggleStr.slice(i, i + IDX_CHARS), 36);
-                if (isNaN(idx) || idx >= P) return null;
-                toggledIndices.push(idx);
-            }
-        }
+        const toggledIndices = parseToggledIndices(toggleStr, P);
+        if (toggledIndices === null) return null;
 
         return {
             seed,
@@ -284,31 +284,7 @@ export function decodePlanetCode(code) {
 
     if (isPrev) {
         // Previous-gen 14-char decode: two erosion sliders, no ridge/creep/glacial
-        const teIdx = Number(packed % BigInt(PREV_RADICES[0]));
-        packed = packed / BigInt(PREV_RADICES[0]);
-
-        const heIdx = Number(packed % BigInt(PREV_RADICES[1]));
-        packed = packed / BigInt(PREV_RADICES[1]);
-
-        const smIdx = Number(packed % BigInt(PREV_RADICES[2]));
-        packed = packed / BigInt(PREV_RADICES[2]);
-
-        const nsIdx = Number(packed % BigInt(PREV_RADICES[3]));
-        packed = packed / BigInt(PREV_RADICES[3]);
-
-        const cnIdx = Number(packed % BigInt(PREV_RADICES[4]));
-        packed = packed / BigInt(PREV_RADICES[4]);
-
-        const pIdx = Number(packed % BigInt(PREV_RADICES[5]));
-        packed = packed / BigInt(PREV_RADICES[5]);
-
-        const jIdx = Number(packed % BigInt(PREV_RADICES[6]));
-        packed = packed / BigInt(PREV_RADICES[6]);
-
-        const nIdx = Number(packed % BigInt(PREV_RADICES[7]));
-        packed = packed / BigInt(PREV_RADICES[7]);
-
-        const seed = Number(packed);
+        const [teIdx, heIdx, smIdx, nsIdx, cnIdx, pIdx, jIdx, nIdx, seed] = unpackBigInt(packed, PREV_RADICES);
 
         if (seed < 0 || seed >= SEED_MAX) return null;
         if (nIdx >= SLIDERS[0].count || jIdx >= SLIDERS[1].count ||
@@ -318,14 +294,8 @@ export function decodePlanetCode(code) {
 
         const P = fromIndex(pIdx, SLIDERS[2]);
 
-        const toggledIndices = [];
-        if (toggleStr) {
-            for (let i = 0; i < toggleStr.length; i += IDX_CHARS) {
-                const idx = parseInt(toggleStr.slice(i, i + IDX_CHARS), 36);
-                if (isNaN(idx) || idx >= P) return null;
-                toggledIndices.push(idx);
-            }
-        }
+        const toggledIndices = parseToggledIndices(toggleStr, P);
+        if (toggledIndices === null) return null;
 
         return {
             seed,
@@ -348,37 +318,7 @@ export function decodePlanetCode(code) {
 
     if (isPrev2) {
         // Previous2-gen 16-char decode: all sliders except glacial erosion
-        const scIdx = Number(packed % BigInt(PREV2_RADICES[0]));
-        packed = packed / BigInt(PREV2_RADICES[0]);
-
-        const rsIdx = Number(packed % BigInt(PREV2_RADICES[1]));
-        packed = packed / BigInt(PREV2_RADICES[1]);
-
-        const teIdx = Number(packed % BigInt(PREV2_RADICES[2]));
-        packed = packed / BigInt(PREV2_RADICES[2]);
-
-        const heIdx = Number(packed % BigInt(PREV2_RADICES[3]));
-        packed = packed / BigInt(PREV2_RADICES[3]);
-
-        const smIdx = Number(packed % BigInt(PREV2_RADICES[4]));
-        packed = packed / BigInt(PREV2_RADICES[4]);
-
-        const nsIdx = Number(packed % BigInt(PREV2_RADICES[5]));
-        packed = packed / BigInt(PREV2_RADICES[5]);
-
-        const cnIdx = Number(packed % BigInt(PREV2_RADICES[6]));
-        packed = packed / BigInt(PREV2_RADICES[6]);
-
-        const pIdx = Number(packed % BigInt(PREV2_RADICES[7]));
-        packed = packed / BigInt(PREV2_RADICES[7]);
-
-        const jIdx = Number(packed % BigInt(PREV2_RADICES[8]));
-        packed = packed / BigInt(PREV2_RADICES[8]);
-
-        const nIdx = Number(packed % BigInt(PREV2_RADICES[9]));
-        packed = packed / BigInt(PREV2_RADICES[9]);
-
-        const seed = Number(packed);
+        const [scIdx, rsIdx, teIdx, heIdx, smIdx, nsIdx, cnIdx, pIdx, jIdx, nIdx, seed] = unpackBigInt(packed, PREV2_RADICES);
 
         if (seed < 0 || seed >= SEED_MAX) return null;
         if (nIdx >= SLIDERS[0].count || jIdx >= SLIDERS[1].count ||
@@ -389,14 +329,8 @@ export function decodePlanetCode(code) {
 
         const P = fromIndex(pIdx, SLIDERS[2]);
 
-        const toggledIndices = [];
-        if (toggleStr) {
-            for (let i = 0; i < toggleStr.length; i += IDX_CHARS) {
-                const idx = parseInt(toggleStr.slice(i, i + IDX_CHARS), 36);
-                if (isNaN(idx) || idx >= P) return null;
-                toggledIndices.push(idx);
-            }
-        }
+        const toggledIndices = parseToggledIndices(toggleStr, P);
+        if (toggledIndices === null) return null;
 
         return {
             seed,
@@ -419,40 +353,7 @@ export function decodePlanetCode(code) {
 
     if (isPrev3) {
         // Previous3-gen 17-char decode: all sliders except terrain warp
-        const scIdx = Number(packed % BigInt(PREV3_RADICES[0]));
-        packed = packed / BigInt(PREV3_RADICES[0]);
-
-        const rsIdx = Number(packed % BigInt(PREV3_RADICES[1]));
-        packed = packed / BigInt(PREV3_RADICES[1]);
-
-        const teIdx = Number(packed % BigInt(PREV3_RADICES[2]));
-        packed = packed / BigInt(PREV3_RADICES[2]);
-
-        const heIdx = Number(packed % BigInt(PREV3_RADICES[3]));
-        packed = packed / BigInt(PREV3_RADICES[3]);
-
-        const glIdx = Number(packed % BigInt(PREV3_RADICES[4]));
-        packed = packed / BigInt(PREV3_RADICES[4]);
-
-        const smIdx = Number(packed % BigInt(PREV3_RADICES[5]));
-        packed = packed / BigInt(PREV3_RADICES[5]);
-
-        const nsIdx = Number(packed % BigInt(PREV3_RADICES[6]));
-        packed = packed / BigInt(PREV3_RADICES[6]);
-
-        const cnIdx = Number(packed % BigInt(PREV3_RADICES[7]));
-        packed = packed / BigInt(PREV3_RADICES[7]);
-
-        const pIdx = Number(packed % BigInt(PREV3_RADICES[8]));
-        packed = packed / BigInt(PREV3_RADICES[8]);
-
-        const jIdx = Number(packed % BigInt(PREV3_RADICES[9]));
-        packed = packed / BigInt(PREV3_RADICES[9]);
-
-        const nIdx = Number(packed % BigInt(PREV3_RADICES[10]));
-        packed = packed / BigInt(PREV3_RADICES[10]);
-
-        const seed = Number(packed);
+        const [scIdx, rsIdx, teIdx, heIdx, glIdx, smIdx, nsIdx, cnIdx, pIdx, jIdx, nIdx, seed] = unpackBigInt(packed, PREV3_RADICES);
 
         if (seed < 0 || seed >= SEED_MAX) return null;
         if (nIdx >= SLIDERS[0].count || jIdx >= SLIDERS[1].count ||
@@ -464,14 +365,8 @@ export function decodePlanetCode(code) {
 
         const P = fromIndex(pIdx, SLIDERS[2]);
 
-        const toggledIndices = [];
-        if (toggleStr) {
-            for (let i = 0; i < toggleStr.length; i += IDX_CHARS) {
-                const idx = parseInt(toggleStr.slice(i, i + IDX_CHARS), 36);
-                if (isNaN(idx) || idx >= P) return null;
-                toggledIndices.push(idx);
-            }
-        }
+        const toggledIndices = parseToggledIndices(toggleStr, P);
+        if (toggledIndices === null) return null;
 
         return {
             seed,
@@ -495,43 +390,7 @@ export function decodePlanetCode(code) {
     if (isPrev4) {
         // Previous4-gen 18-char decode: all terrain/erosion sliders, no planetary physics.
         // Uses PREV4_RADICES which match the first 12 entries of RADICES.
-        const twIdx = Number(packed % BigInt(PREV4_RADICES[0]));
-        packed = packed / BigInt(PREV4_RADICES[0]);
-
-        const scIdx = Number(packed % BigInt(PREV4_RADICES[1]));
-        packed = packed / BigInt(PREV4_RADICES[1]);
-
-        const rsIdx = Number(packed % BigInt(PREV4_RADICES[2]));
-        packed = packed / BigInt(PREV4_RADICES[2]);
-
-        const teIdx = Number(packed % BigInt(PREV4_RADICES[3]));
-        packed = packed / BigInt(PREV4_RADICES[3]);
-
-        const heIdx = Number(packed % BigInt(PREV4_RADICES[4]));
-        packed = packed / BigInt(PREV4_RADICES[4]);
-
-        const glIdx = Number(packed % BigInt(PREV4_RADICES[5]));
-        packed = packed / BigInt(PREV4_RADICES[5]);
-
-        const smIdx = Number(packed % BigInt(PREV4_RADICES[6]));
-        packed = packed / BigInt(PREV4_RADICES[6]);
-
-        const nsIdx = Number(packed % BigInt(PREV4_RADICES[7]));
-        packed = packed / BigInt(PREV4_RADICES[7]);
-
-        const cnIdx = Number(packed % BigInt(PREV4_RADICES[8]));
-        packed = packed / BigInt(PREV4_RADICES[8]);
-
-        const pIdx = Number(packed % BigInt(PREV4_RADICES[9]));
-        packed = packed / BigInt(PREV4_RADICES[9]);
-
-        const jIdx = Number(packed % BigInt(PREV4_RADICES[10]));
-        packed = packed / BigInt(PREV4_RADICES[10]);
-
-        const nIdx = Number(packed % BigInt(PREV4_RADICES[11]));
-        packed = packed / BigInt(PREV4_RADICES[11]);
-
-        const seed = Number(packed);
+        const [twIdx, scIdx, rsIdx, teIdx, heIdx, glIdx, smIdx, nsIdx, cnIdx, pIdx, jIdx, nIdx, seed] = unpackBigInt(packed, PREV4_RADICES);
 
         if (seed < 0 || seed >= SEED_MAX) return null;
         if (nIdx >= SLIDERS[0].count || jIdx >= SLIDERS[1].count ||
@@ -543,14 +402,8 @@ export function decodePlanetCode(code) {
 
         const P = fromIndex(pIdx, SLIDERS[2]);
 
-        const toggledIndices = [];
-        if (toggleStr) {
-            for (let i = 0; i < toggleStr.length; i += IDX_CHARS) {
-                const idx = parseInt(toggleStr.slice(i, i + IDX_CHARS), 36);
-                if (isNaN(idx) || idx >= P) return null;
-                toggledIndices.push(idx);
-            }
-        }
+        const toggledIndices = parseToggledIndices(toggleStr, P);
+        if (toggledIndices === null) return null;
 
         return {
             seed,
@@ -573,24 +426,8 @@ export function decodePlanetCode(code) {
 
     if (isPrev5) {
         // Previous5-gen 23-char decode: all sliders before world size was added.
-        const twIdx   = Number(packed % BigInt(RADICES[0]));  packed = packed / BigInt(RADICES[0]);
-        const scIdx   = Number(packed % BigInt(RADICES[1]));  packed = packed / BigInt(RADICES[1]);
-        const rsIdx   = Number(packed % BigInt(RADICES[2]));  packed = packed / BigInt(RADICES[2]);
-        const teIdx   = Number(packed % BigInt(RADICES[3]));  packed = packed / BigInt(RADICES[3]);
-        const heIdx   = Number(packed % BigInt(RADICES[4]));  packed = packed / BigInt(RADICES[4]);
-        const glIdx   = Number(packed % BigInt(RADICES[5]));  packed = packed / BigInt(RADICES[5]);
-        const smIdx   = Number(packed % BigInt(RADICES[6]));  packed = packed / BigInt(RADICES[6]);
-        const nsIdx   = Number(packed % BigInt(RADICES[7]));  packed = packed / BigInt(RADICES[7]);
-        const cnIdx   = Number(packed % BigInt(RADICES[8]));  packed = packed / BigInt(RADICES[8]);
-        const pIdx    = Number(packed % BigInt(RADICES[9]));  packed = packed / BigInt(RADICES[9]);
-        const jIdx    = Number(packed % BigInt(RADICES[10])); packed = packed / BigInt(RADICES[10]);
-        const nIdx    = Number(packed % BigInt(RADICES[11])); packed = packed / BigInt(RADICES[11]);
-        const gravIdx = Number(packed % BigInt(RADICES[12])); packed = packed / BigInt(RADICES[12]);
-        const atmIdx  = Number(packed % BigInt(RADICES[13])); packed = packed / BigInt(RADICES[13]);
-        const hydroIdx= Number(packed % BigInt(RADICES[14])); packed = packed / BigInt(RADICES[14]);
-        const btIdx   = Number(packed % BigInt(RADICES[15])); packed = packed / BigInt(RADICES[15]);
-        const tiltIdx = Number(packed % BigInt(RADICES[16])); packed = packed / BigInt(RADICES[16]);
-        const seed = Number(packed);
+        const [twIdx, scIdx, rsIdx, teIdx, heIdx, glIdx, smIdx, nsIdx, cnIdx, pIdx, jIdx, nIdx,
+               gravIdx, atmIdx, hydroIdx, btIdx, tiltIdx, seed] = unpackBigInt(packed, RADICES.slice(0, 17));
         if (seed < 0 || seed >= SEED_MAX) return null;
         if (nIdx    >= SLIDERS[0].count  || jIdx  >= SLIDERS[1].count  ||
             pIdx    >= SLIDERS[2].count  || cnIdx >= SLIDERS[3].count  ||
@@ -602,14 +439,8 @@ export function decodePlanetCode(code) {
             hydroIdx>= SLIDERS[14].count || btIdx >= SLIDERS[15].count ||
             tiltIdx >= SLIDERS[16].count) return null;
         const P = fromIndex(pIdx, SLIDERS[2]);
-        const toggledIndices = [];
-        if (toggleStr) {
-            for (let i = 0; i < toggleStr.length; i += IDX_CHARS) {
-                const idx = parseInt(toggleStr.slice(i, i + IDX_CHARS), 36);
-                if (isNaN(idx) || idx >= P) return null;
-                toggledIndices.push(idx);
-            }
-        }
+        const toggledIndices = parseToggledIndices(toggleStr, P);
+        if (toggledIndices === null) return null;
         return {
             seed,
             N: fromIndex(nIdx, SLIDERS[0]), jitter: fromIndex(jIdx, SLIDERS[1]), P,
@@ -627,26 +458,8 @@ export function decodePlanetCode(code) {
     }
 
     // New 24-char decode: all sliders including world size.
-    const twIdx   = Number(packed % BigInt(RADICES[0]));  packed = packed / BigInt(RADICES[0]);
-    const scIdx   = Number(packed % BigInt(RADICES[1]));  packed = packed / BigInt(RADICES[1]);
-    const rsIdx   = Number(packed % BigInt(RADICES[2]));  packed = packed / BigInt(RADICES[2]);
-    const teIdx   = Number(packed % BigInt(RADICES[3]));  packed = packed / BigInt(RADICES[3]);
-    const heIdx   = Number(packed % BigInt(RADICES[4]));  packed = packed / BigInt(RADICES[4]);
-    const glIdx   = Number(packed % BigInt(RADICES[5]));  packed = packed / BigInt(RADICES[5]);
-    const smIdx   = Number(packed % BigInt(RADICES[6]));  packed = packed / BigInt(RADICES[6]);
-    const nsIdx   = Number(packed % BigInt(RADICES[7]));  packed = packed / BigInt(RADICES[7]);
-    const cnIdx   = Number(packed % BigInt(RADICES[8]));  packed = packed / BigInt(RADICES[8]);
-    const pIdx    = Number(packed % BigInt(RADICES[9]));  packed = packed / BigInt(RADICES[9]);
-    const jIdx    = Number(packed % BigInt(RADICES[10])); packed = packed / BigInt(RADICES[10]);
-    const nIdx    = Number(packed % BigInt(RADICES[11])); packed = packed / BigInt(RADICES[11]);
-    const gravIdx = Number(packed % BigInt(RADICES[12])); packed = packed / BigInt(RADICES[12]);
-    const atmIdx  = Number(packed % BigInt(RADICES[13])); packed = packed / BigInt(RADICES[13]);
-    const hydroIdx= Number(packed % BigInt(RADICES[14])); packed = packed / BigInt(RADICES[14]);
-    const btIdx   = Number(packed % BigInt(RADICES[15])); packed = packed / BigInt(RADICES[15]);
-    const tiltIdx = Number(packed % BigInt(RADICES[16])); packed = packed / BigInt(RADICES[16]);
-    const wsIdx   = Number(packed % BigInt(RADICES[17])); packed = packed / BigInt(RADICES[17]);
-
-    const seed = Number(packed);
+    const [twIdx, scIdx, rsIdx, teIdx, heIdx, glIdx, smIdx, nsIdx, cnIdx, pIdx, jIdx, nIdx,
+           gravIdx, atmIdx, hydroIdx, btIdx, tiltIdx, wsIdx, seed] = unpackBigInt(packed, RADICES);
 
     // Validate ranges
     if (seed < 0 || seed >= SEED_MAX) return null;
@@ -662,15 +475,8 @@ export function decodePlanetCode(code) {
 
     const P = fromIndex(pIdx, SLIDERS[2]);
 
-    // Decode toggled plate indices
-    const toggledIndices = [];
-    if (toggleStr) {
-        for (let i = 0; i < toggleStr.length; i += IDX_CHARS) {
-            const idx = parseInt(toggleStr.slice(i, i + IDX_CHARS), 36);
-            if (isNaN(idx) || idx >= P) return null;
-            toggledIndices.push(idx);
-        }
-    }
+    const toggledIndices = parseToggledIndices(toggleStr, P);
+    if (toggledIndices === null) return null;
 
     return {
         seed,

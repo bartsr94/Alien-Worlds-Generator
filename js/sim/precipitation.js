@@ -2,7 +2,7 @@
 // orographic effects, ITCZ uplift, frontal convergence, and polar fronts.
 // Computes per-region precipitation for summer and winter seasons.
 
-import { smoothstep } from './climate-util.js';
+import { smoothstep, EARTH_RADIUS_KM } from './climate-util.js';
 import { computeGradients } from './wind.js';
 import { elevToHeightKm } from '../core/elev-scale.js';
 import { computeHeuristicPrecipitation, computeHeuristicWindField } from './heuristic-precip.js';
@@ -216,7 +216,7 @@ export function computePrecipitation(mesh, r_xyz, r_elevation, windResult, ocean
     // Scale-dependent hop count: ~2000 km reach.
     // Average edge length ≈ π / sqrt(numRegions) radians ≈ (π * 6371) / sqrt(N) km
     // hops ≈ 2000 / edgeLengthKm
-    const avgEdgeKm = (Math.PI * 6371) / Math.sqrt(numRegions);
+    const avgEdgeKm = (Math.PI * EARTH_RADIUS_KM) / Math.sqrt(numRegions);
     const avgEdgeRad = Math.PI / Math.sqrt(numRegions);
     const maxHops = Math.max(8, Math.min(20, Math.round(2000 / avgEdgeKm)));
 

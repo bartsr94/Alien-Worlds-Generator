@@ -44,6 +44,10 @@ function _emptyRegistry() {
     return { activeSystemId: null, systems: [] };
 }
 
+function getSystem(registry, systemId) {
+    return registry.systems.find(s => s.id === systemId) ?? null;
+}
+
 export function saveRegistry(registry) {
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(registry));
@@ -99,13 +103,13 @@ export function setActiveSystemId(id) {
 
 export function getBodyOverride(systemId, bodyId) {
     const registry = loadRegistry();
-    const sys = registry.systems.find(s => s.id === systemId);
+    const sys = getSystem(registry, systemId);
     return sys?.bodyOverrides?.[bodyId] ?? null;
 }
 
 export function saveBodyOverride(systemId, bodyId, params) {
     const registry = loadRegistry();
-    const sys = registry.systems.find(s => s.id === systemId);
+    const sys = getSystem(registry, systemId);
     if (!sys) return;
     sys.bodyOverrides = sys.bodyOverrides ?? {};
     sys.bodyOverrides[bodyId] = {
@@ -121,7 +125,7 @@ export function saveBodyOverride(systemId, bodyId, params) {
 
 export function clearBodyOverride(systemId, bodyId) {
     const registry = loadRegistry();
-    const sys = registry.systems.find(s => s.id === systemId);
+    const sys = getSystem(registry, systemId);
     if (!sys?.bodyOverrides) return;
     delete sys.bodyOverrides[bodyId];
     saveRegistry(registry);
@@ -131,7 +135,7 @@ export function clearBodyOverride(systemId, bodyId) {
 
 export function markBodyGenerated(systemId, bodyId) {
     const registry = loadRegistry();
-    const sys = registry.systems.find(s => s.id === systemId);
+    const sys = getSystem(registry, systemId);
     if (!sys) return;
     sys.generatedBodyIds = sys.generatedBodyIds ?? [];
     if (!sys.generatedBodyIds.includes(bodyId)) {
@@ -142,7 +146,7 @@ export function markBodyGenerated(systemId, bodyId) {
 
 export function isBodyGenerated(systemId, bodyId) {
     const registry = loadRegistry();
-    const sys = registry.systems.find(s => s.id === systemId);
+    const sys = getSystem(registry, systemId);
     return sys?.generatedBodyIds?.includes(bodyId) ?? false;
 }
 
@@ -151,7 +155,7 @@ export function isBodyGenerated(systemId, bodyId) {
  */
 export function renameSystem(systemId, newName) {
     const registry = loadRegistry();
-    const sys = registry.systems.find(s => s.id === systemId);
+    const sys = getSystem(registry, systemId);
     if (!sys) return;
     sys.name    = newName;
     sys.savedAt = Date.now();

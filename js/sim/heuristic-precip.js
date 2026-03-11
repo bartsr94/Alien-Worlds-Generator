@@ -4,7 +4,7 @@
 // (distance from ITCZ), seasonal modifier, continental dryness, and
 // orographic rain shadow.
 
-import { smoothstep, smoothField, makeItczLookup } from './climate-util.js';
+import { smoothstep, smoothField, makeItczLookup, EARTH_RADIUS_KM } from './climate-util.js';
 import { elevToHeightKm } from '../core/elev-scale.js';
 
 const DEG = Math.PI / 180;
@@ -119,7 +119,7 @@ export function computeHeuristicPrecipitation(mesh, r_xyz, r_elevation, windResu
     const numRegions = mesh.numRegions;
     const { r_lat, r_lon, r_isLand, r_continentality } = windResult;
 
-    const avgEdgeKm = (Math.PI * 6371) / Math.sqrt(numRegions);
+    const avgEdgeKm = (Math.PI * EARTH_RADIUS_KM) / Math.sqrt(numRegions);
 
     // Precompute west-coast proximity: positive = west coast, negative = east coast.
     // Coastal land cells check which side ocean is on relative to the local east

@@ -1,5 +1,8 @@
 // Shared climate utilities: smoothstep, smoothing, ITCZ lookup, and percentile selection.
+// ── Physical constants ────────────────────────────────────────────────────────
 
+/** Mean radius of Earth in km. Used throughout sim as the reference scale. */
+export const EARTH_RADIUS_KM = 6371;
 // ── Smoothstep utility ───────────────────────────────────────────────────────
 
 export function smoothstep(edge0, edge1, x) {
@@ -114,5 +117,38 @@ export function percentile(arr, p) {
     const work = new Float32Array(arr);
     const k = Math.floor(n * p);
     floydRivest(work, 0, n - 1, k);
-    return work[k] || 1;
+    const val = work[k];
+    return val !== 0 ? val : 1;
+}
+
+// ── BFS distance field ───────────────────────────────────────────────────────
+
+/**
+ * Multi-source BFS distance field. Returns a Float32Array where seeds=0 and
+ * each other cell = hop distance from nearest seed, or Infinity if unreachable.
+ *
+ * @param {number}   numRegions
+ * @param {Int32Array} adjOffset
+ * @param {Int32Array} adjList
+ * @param {number}   maxDist    - stop expanding beyond this many hops
+ * @param {function} seedTest   - seedTest(r) → true if r is a seed
+ * @param {function} passFilter - passFilter(r, nr) → true if the edge r→nr is traversable
+ */
+export function bfsDistField(numRegions, adjOffset, adjList, maxDist, seedTest, passFilter) {
+    const dist = new Float32Array(numRegions).fill(Infinity);
+    const queue = [];
+    for (let r = 0; r < numRegions; r++) {
+        if (seedTest(r)) { dist[r] = 0; queue.push(r); }
+    }
+    let qi = 0;
+    while (qi < queue.length) {
+        const r = queue[qi++];
+        const nd = dist[r] + 1;
+        if (nd > maxDist) continue;
+        for (let ni = adjOffset[r], niEnd = adjOffset[r + 1]; ni < niEnd; ni++) {
+            const nr = adjList[ni];
+            if (nd < dist[nr] && passFilter(r, nr)) { dist[nr] = nd; queue.push(nr); }
+        }
+    }
+    return dist;
 }

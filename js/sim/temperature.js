@@ -4,7 +4,7 @@
 // ocean current warmth, and precipitation/cloud cover moderation.
 // Returns normalized 0-1 values mapped to a fixed -45 to +45 C range.
 
-import { smoothstep, smoothField, makeItczLookup } from './climate-util.js';
+import { smoothstep, smoothField, makeItczLookup, EARTH_RADIUS_KM } from './climate-util.js';
 import { elevToHeightKm } from '../render/color-map.js';
 
 const DEG = Math.PI / 180;
@@ -73,7 +73,7 @@ export function computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanRe
 
     // Scale smoothing passes to target ~200 km physical blending radius regardless of resolution.
     // (CLAUDE.md scale-invariance rule: passes = round(targetKm / avgEdgeKm))
-    const avgEdgeKm = (Math.PI * 6371) / Math.sqrt(numRegions);
+    const avgEdgeKm = (Math.PI * EARTH_RADIUS_KM) / Math.sqrt(numRegions);
     const smoothPasses = Math.max(1, Math.round(200 / avgEdgeKm));
 
     // ── Planetary params ──────────────────────────────────────────────────────
@@ -113,7 +113,7 @@ export function computeTemperature(mesh, r_xyz, r_elevation, windResult, oceanRe
         // Use plate-based continentality for diffusion so warmth crosses
         // continental shelves and reaches further inland
         const plateCont = r_plateContinentality || r_continentality;
-        const avgEdgeKm = (Math.PI * 6371) / Math.sqrt(numRegions);
+        const avgEdgeKm = (Math.PI * EARTH_RADIUS_KM) / Math.sqrt(numRegions);
         const oceanWarmthPasses = Math.max(4, Math.round(1400 / avgEdgeKm));
         const coastalWarmth = diffuseOceanWarmth(mesh, r_oceanWarmth, r_isLand, plateCont, oceanWarmthPasses);
 

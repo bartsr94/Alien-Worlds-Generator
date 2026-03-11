@@ -20,6 +20,69 @@ function exportFilename(type, seed) {
     }
 }
 
+// sRGB IEC 61966-2-1 transfer function: linear float → 8-bit encoded value.
+function srgbLinearToGamma(v) {
+    return (v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055) * 255 + 0.5 | 0;
+}
+
+// Build the equirectangular triangle mesh positions for all sides.
+// Returns { posArr, triRegions, triCount } where posArr has worst-case capacity
+// (2 tris per side for antimeridian-wrapping triangles) and triRegions maps each
+// triangle index back to its originating region.
+function buildExportPositions(mesh, r_xyz, t_xyz) {
+    const { numSides } = mesh;
+    const PI = Math.PI;
+    const sx = 2 / PI;
+    const clx = v => Math.max(-2, Math.min(2, v));
+    const cly = v => Math.max(-1, Math.min(1, v));
+    const posArr    = new Float32Array(numSides * 18);
+    const triRegions = new Uint32Array(numSides * 2);
+    let triCount = 0;
+
+    for (let s = 0; s < numSides; s++) {
+        const it = mesh.s_inner_t(s);
+        const ot = mesh.s_outer_t(s);
+        const br = mesh.s_begin_r(s);
+
+        const x0 = t_xyz[3*it], y0 = t_xyz[3*it+1], z0 = t_xyz[3*it+2];
+        const x1 = t_xyz[3*ot], y1 = t_xyz[3*ot+1], z1 = t_xyz[3*ot+2];
+        const x2 = r_xyz[3*br], y2 = r_xyz[3*br+1], z2 = r_xyz[3*br+2];
+
+        let lon0 = Math.atan2(x0, z0), lat0 = Math.asin(Math.max(-1, Math.min(1, y0)));
+        let lon1 = Math.atan2(x1, z1), lat1 = Math.asin(Math.max(-1, Math.min(1, y1)));
+        let lon2 = Math.atan2(x2, z2), lat2 = Math.asin(Math.max(-1, Math.min(1, y2)));
+
+        const maxLon = Math.max(lon0, lon1, lon2);
+        const minLon = Math.min(lon0, lon1, lon2);
+        const wraps = (maxLon - minLon) > PI;
+
+        if (wraps) {
+            if (lon0 < 0) lon0 += 2 * PI;
+            if (lon1 < 0) lon1 += 2 * PI;
+            if (lon2 < 0) lon2 += 2 * PI;
+
+            let off = triCount * 9;
+            posArr[off]   = clx(lon0*sx); posArr[off+1] = cly(lat0*sx); posArr[off+2] = 0;
+            posArr[off+3] = clx(lon1*sx); posArr[off+4] = cly(lat1*sx); posArr[off+5] = 0;
+            posArr[off+6] = clx(lon2*sx); posArr[off+7] = cly(lat2*sx); posArr[off+8] = 0;
+            triRegions[triCount++] = br;
+
+            off = triCount * 9;
+            posArr[off]   = clx((lon0-2*PI)*sx); posArr[off+1] = cly(lat0*sx); posArr[off+2] = 0;
+            posArr[off+3] = clx((lon1-2*PI)*sx); posArr[off+4] = cly(lat1*sx); posArr[off+5] = 0;
+            posArr[off+6] = clx((lon2-2*PI)*sx); posArr[off+7] = cly(lat2*sx); posArr[off+8] = 0;
+            triRegions[triCount++] = br;
+        } else {
+            const off = triCount * 9;
+            posArr[off]   = clx(lon0*sx); posArr[off+1] = cly(lat0*sx); posArr[off+2] = 0;
+            posArr[off+3] = clx(lon1*sx); posArr[off+4] = cly(lat1*sx); posArr[off+5] = 0;
+            posArr[off+6] = clx(lon2*sx); posArr[off+7] = cly(lat2*sx); posArr[off+8] = 0;
+            triRegions[triCount++] = br;
+        }
+    }
+    return { posArr, triRegions, triCount };
+}
+
 // Export equirectangular map as PNG (async, with tiled rendering for large sizes).
 export async function exportMap(type, width, onProgress) {
     if (!state.curData) return;
@@ -37,20 +100,11 @@ export async function exportMap(type, width, onProgress) {
     const biomeMode = state.planetaryParams?.biomeMode ?? 'earth';
     const biomeSmoothed = (type === 'biome' && koppenArr) ? getCachedBiomeSmoothed(mesh, koppenArr, r_elevation, biomeMode) : null;
 
-    // Build map triangles (same projection as buildMapMesh, chosen coloring, no grid)
-    const { numSides } = mesh;
-    const PI = Math.PI;
-    const sx = 2 / PI;
-
-    const posArr = new Float32Array(numSides * 18);
-    const colArr = new Float32Array(numSides * 18);
-    let triCount = 0;
-
-    for (let s = 0; s < numSides; s++) {
-        const it = mesh.s_inner_t(s);
-        const ot = mesh.s_outer_t(s);
-        const br = mesh.s_begin_r(s);
-
+    // Build equirectangular triangle mesh and derive per-triangle colors.
+    const { posArr, triRegions, triCount } = buildExportPositions(mesh, r_xyz, t_xyz);
+    const colArr = new Float32Array(triCount * 9);
+    for (let i = 0; i < triCount; i++) {
+        const br = triRegions[i];
         let cr, cg, cb;
         if (type === 'landmask') {
             [cr, cg, cb] = landMaskColor(r_elevation[br]);
@@ -65,59 +119,15 @@ export async function exportMap(type, width, onProgress) {
         } else {
             [cr, cg, cb] = elevationToColor(r_elevation[br]);
         }
-
-        const x0 = t_xyz[3*it], y0 = t_xyz[3*it+1], z0 = t_xyz[3*it+2];
-        const x1 = t_xyz[3*ot], y1 = t_xyz[3*ot+1], z1 = t_xyz[3*ot+2];
-        const x2 = r_xyz[3*br], y2 = r_xyz[3*br+1], z2 = r_xyz[3*br+2];
-
-        let lon0 = Math.atan2(x0, z0), lat0 = Math.asin(Math.max(-1, Math.min(1, y0)));
-        let lon1 = Math.atan2(x1, z1), lat1 = Math.asin(Math.max(-1, Math.min(1, y1)));
-        let lon2 = Math.atan2(x2, z2), lat2 = Math.asin(Math.max(-1, Math.min(1, y2)));
-
-        const clx = (v) => Math.max(-2, Math.min(2, v));
-        const cly = (v) => Math.max(-1, Math.min(1, v));
-
-        const maxLon = Math.max(lon0, lon1, lon2);
-        const minLon = Math.min(lon0, lon1, lon2);
-        const wraps = (maxLon - minLon) > PI;
-
-        if (wraps) {
-            if (lon0 < 0) lon0 += 2 * PI;
-            if (lon1 < 0) lon1 += 2 * PI;
-            if (lon2 < 0) lon2 += 2 * PI;
-
-            let off = triCount * 9;
-            posArr[off]   = clx(lon0*sx); posArr[off+1] = cly(lat0*sx); posArr[off+2] = 0;
-            posArr[off+3] = clx(lon1*sx); posArr[off+4] = cly(lat1*sx); posArr[off+5] = 0;
-            posArr[off+6] = clx(lon2*sx); posArr[off+7] = cly(lat2*sx); posArr[off+8] = 0;
-            colArr[off]=cr; colArr[off+1]=cg; colArr[off+2]=cb;
-            colArr[off+3]=cr; colArr[off+4]=cg; colArr[off+5]=cb;
-            colArr[off+6]=cr; colArr[off+7]=cg; colArr[off+8]=cb;
-            triCount++;
-
-            off = triCount * 9;
-            posArr[off]   = clx((lon0-2*PI)*sx); posArr[off+1] = cly(lat0*sx); posArr[off+2] = 0;
-            posArr[off+3] = clx((lon1-2*PI)*sx); posArr[off+4] = cly(lat1*sx); posArr[off+5] = 0;
-            posArr[off+6] = clx((lon2-2*PI)*sx); posArr[off+7] = cly(lat2*sx); posArr[off+8] = 0;
-            colArr[off]=cr; colArr[off+1]=cg; colArr[off+2]=cb;
-            colArr[off+3]=cr; colArr[off+4]=cg; colArr[off+5]=cb;
-            colArr[off+6]=cr; colArr[off+7]=cg; colArr[off+8]=cb;
-            triCount++;
-        } else {
-            const off = triCount * 9;
-            posArr[off]   = clx(lon0*sx); posArr[off+1] = cly(lat0*sx); posArr[off+2] = 0;
-            posArr[off+3] = clx(lon1*sx); posArr[off+4] = cly(lat1*sx); posArr[off+5] = 0;
-            posArr[off+6] = clx(lon2*sx); posArr[off+7] = cly(lat2*sx); posArr[off+8] = 0;
-            colArr[off]=cr; colArr[off+1]=cg; colArr[off+2]=cb;
-            colArr[off+3]=cr; colArr[off+4]=cg; colArr[off+5]=cb;
-            colArr[off+6]=cr; colArr[off+7]=cg; colArr[off+8]=cb;
-            triCount++;
-        }
+        const off = i * 9;
+        colArr[off] = colArr[off+3] = colArr[off+6] = cr;
+        colArr[off+1] = colArr[off+4] = colArr[off+7] = cg;
+        colArr[off+2] = colArr[off+5] = colArr[off+8] = cb;
     }
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(posArr.buffer, 0, triCount * 9), 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colArr.buffer, 0, triCount * 9), 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
 
     const mapMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
 
@@ -178,9 +188,7 @@ export async function exportMap(type, width, onProgress) {
                     const si = src + x * 4, di = dst + x * 4;
                     for (let c = 0; c < 3; c++) {
                         const v = pixels[si + c] / 255;
-                        out[di + c] = (v <= 0.0031308
-                            ? v * 12.92
-                            : 1.055 * Math.pow(v, 1 / 2.4) - 0.055) * 255 + 0.5 | 0;
+                        out[di + c] = srgbLinearToGamma(v);
                     }
                     out[di + 3] = pixels[si + 3];
                 }
@@ -201,7 +209,8 @@ export async function exportMap(type, width, onProgress) {
     if (onProgress) onProgress(85, 'Encoding PNG...');
     await new Promise(r => setTimeout(r, 0));
 
-    const code = location.hash.replace(/^#/, '').trim() || (state.curData ? state.curData.seed : '');
+    const rawCode = location.hash.replace(/^#/, '').trim() || (state.curData ? String(state.curData.seed) : 'planet');
+    const code = rawCode.replace(/[^a-zA-Z0-9_-]/g, '_');
     const filename = exportFilename(type, code);
 
     await new Promise(resolve => {
@@ -235,65 +244,9 @@ export async function exportMapBatch(types, width, onProgress) {
     const koppenArr = debugLayers && debugLayers.koppen;
     const biomeMode = state.planetaryParams?.biomeMode ?? 'earth';
     const biomeSmoothed = koppenArr ? getCachedBiomeSmoothed(mesh, koppenArr, r_elevation, biomeMode) : null;
-    const { numSides } = mesh;
-    const PI = Math.PI;
-    const sx = 2 / PI;
 
-    // Build positions once and record per-triangle region indices.
-    // Positions are reused across all export types — only colors change.
-    const posArr = new Float32Array(numSides * 18);
-    const triRegions = new Uint32Array(numSides * 2); // max 2 tris per side (wrapping)
-    let triCount = 0;
-
-    for (let s = 0; s < numSides; s++) {
-        const it = mesh.s_inner_t(s);
-        const ot = mesh.s_outer_t(s);
-        const br = mesh.s_begin_r(s);
-
-        const x0 = t_xyz[3*it], y0 = t_xyz[3*it+1], z0 = t_xyz[3*it+2];
-        const x1 = t_xyz[3*ot], y1 = t_xyz[3*ot+1], z1 = t_xyz[3*ot+2];
-        const x2 = r_xyz[3*br], y2 = r_xyz[3*br+1], z2 = r_xyz[3*br+2];
-
-        let lon0 = Math.atan2(x0, z0), lat0 = Math.asin(Math.max(-1, Math.min(1, y0)));
-        let lon1 = Math.atan2(x1, z1), lat1 = Math.asin(Math.max(-1, Math.min(1, y1)));
-        let lon2 = Math.atan2(x2, z2), lat2 = Math.asin(Math.max(-1, Math.min(1, y2)));
-
-        const clx = (v) => Math.max(-2, Math.min(2, v));
-        const cly = (v) => Math.max(-1, Math.min(1, v));
-
-        const maxLon = Math.max(lon0, lon1, lon2);
-        const minLon = Math.min(lon0, lon1, lon2);
-        const wraps = (maxLon - minLon) > PI;
-
-        if (wraps) {
-            if (lon0 < 0) lon0 += 2 * PI;
-            if (lon1 < 0) lon1 += 2 * PI;
-            if (lon2 < 0) lon2 += 2 * PI;
-
-            let off = triCount * 9;
-            posArr[off]   = clx(lon0*sx); posArr[off+1] = cly(lat0*sx); posArr[off+2] = 0;
-            posArr[off+3] = clx(lon1*sx); posArr[off+4] = cly(lat1*sx); posArr[off+5] = 0;
-            posArr[off+6] = clx(lon2*sx); posArr[off+7] = cly(lat2*sx); posArr[off+8] = 0;
-            triRegions[triCount] = br;
-            triCount++;
-
-            off = triCount * 9;
-            posArr[off]   = clx((lon0-2*PI)*sx); posArr[off+1] = cly(lat0*sx); posArr[off+2] = 0;
-            posArr[off+3] = clx((lon1-2*PI)*sx); posArr[off+4] = cly(lat1*sx); posArr[off+5] = 0;
-            posArr[off+6] = clx((lon2-2*PI)*sx); posArr[off+7] = cly(lat2*sx); posArr[off+8] = 0;
-            triRegions[triCount] = br;
-            triCount++;
-        } else {
-            const off = triCount * 9;
-            posArr[off]   = clx(lon0*sx); posArr[off+1] = cly(lat0*sx); posArr[off+2] = 0;
-            posArr[off+3] = clx(lon1*sx); posArr[off+4] = cly(lat1*sx); posArr[off+5] = 0;
-            posArr[off+6] = clx(lon2*sx); posArr[off+7] = cly(lat2*sx); posArr[off+8] = 0;
-            triRegions[triCount] = br;
-            triCount++;
-        }
-    }
-
-    // Trim position array to actual triangle count
+    // Build equirectangular triangle mesh positions (shared across all export types).
+    const { posArr, triRegions, triCount } = buildExportPositions(mesh, r_xyz, t_xyz);
     const posData = new Float32Array(posArr.buffer, 0, triCount * 9);
 
     const offScene = new THREE.Scene();
@@ -308,7 +261,8 @@ export async function exportMapBatch(types, width, onProgress) {
     const tilesY = Math.ceil(height / tileH);
     const totalTiles = tilesX * tilesY;
 
-    const code = location.hash.replace(/^#/, '').trim() || (state.curData ? state.curData.seed : '');
+    const rawCode = location.hash.replace(/^#/, '').trim() || (state.curData ? String(state.curData.seed) : 'planet');
+    const code = rawCode.replace(/[^a-zA-Z0-9_-]/g, '_');
     const total = types.length;
 
     // Pre-allocate pixel readback buffer (reused across all tiles and types)
@@ -394,9 +348,7 @@ export async function exportMapBatch(types, width, onProgress) {
                         const si = src + x * 4, di = dst + x * 4;
                         for (let c = 0; c < 3; c++) {
                             const v = pixelBuf[si + c] / 255;
-                            out[di + c] = (v <= 0.0031308
-                                ? v * 12.92
-                                : 1.055 * Math.pow(v, 1 / 2.4) - 0.055) * 255 + 0.5 | 0;
+                            out[di + c] = srgbLinearToGamma(v);
                         }
                         out[di + 3] = pixelBuf[si + 3];
                     }

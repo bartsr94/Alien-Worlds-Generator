@@ -18,6 +18,7 @@
 //   mesh conventions) so no per-resolution tuning is needed.
 
 import { makeRng } from '../core/rng.js';
+import { EARTH_RADIUS_KM } from './climate-util.js';
 
 // ---------------------------------------------------------------------------
 // Crater profile — single cell at normalised distance t = d / radius
@@ -99,7 +100,7 @@ function bfsWithinRadius(mesh, r_xyz, centre, maxHops, avgEdgeKm, worldRadiusKm)
                 // Cheap pre-filter: don't queue cells clearly beyond range
                 const nbx = r_xyz[3 * nb], nby = r_xyz[3 * nb + 1], nbz = r_xyz[3 * nb + 2];
                 const nbdot = Math.min(1, Math.max(-1, CX * nbx + CY * nby + CZ * nbz));
-                const nbDist = Math.acos(nbdot) * 6371;
+                const nbDist = Math.acos(nbdot) * EARTH_RADIUS_KM;
                 if (nbDist <= maxDistKm + avgEdgeKm * 2) queue.push(nb);
             }
         }
@@ -186,7 +187,7 @@ export function stampCraters(mesh, r_xyz, r_elevation, seed, planetaryParams) {
     // Physical radius and edge length for THIS world — not hardcoded to Earth.
     // This ensures a "400 km" crater spans the same physical fraction of the
     // sphere regardless of world size, and hop counts are correctly computed.
-    const worldRadiusKm = worldSize * 6371;
+    const worldRadiusKm = worldSize * EARTH_RADIUS_KM;
     const avgEdgeKm = (Math.PI * worldRadiusKm) / Math.sqrt(numRegions);
 
     // Degradation factor for atmosphere=1 (eroded rims, shallower bowls)

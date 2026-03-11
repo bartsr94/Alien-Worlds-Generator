@@ -20,49 +20,67 @@ ctrl.enablePan = false;
 ctrl.minDistance = 1.4; ctrl.maxDistance = 8;
 ctrl.enableZoom = false; // disable built-in zoom; custom handler below
 
-// Smooth zoom: wheel sets a target distance, each frame lerps toward it
-let _zoomTarget = camera.position.distanceTo(ctrl.target);
-const ZOOM_STEP   = 0.92;   // multiplier per tick (lower = faster zoom)
-const ZOOM_SMOOTH = 0.12;   // lerp speed per frame (higher = snappier)
+/**
+ * Create wheel- and pinch-zoom handlers sharing the same smooth-lerp approach.
+ * @param {Object} opts
+ * @param {Object}   opts.ctrl           OrbitControls (gated on .enabled)
+ * @param {Function} opts.getZoom        () → current raw zoom value
+ * @param {Function} opts.setZoom        v → apply new raw zoom value
+ * @param {number}   opts.step           Zoom multiplier per wheel tick (< 1)
+ * @param {number}   opts.smooth         Lerp speed per frame (0–1)
+ * @param {number}   opts.min            Min zoom value
+ * @param {number}   opts.max            Max zoom value
+ * @param {boolean}  opts.growsOnZoomIn  true = orthographic: larger value = closer;
+ *                                       false = perspective: smaller distance = closer
+ */
+function createZoomHandler({ ctrl, getZoom, setZoom, step, smooth, min, max, growsOnZoomIn }) {
+    let zoomTarget = getZoom();
+    let pinchDist  = 0;
+    const zoomInMult = growsOnZoomIn ? 1 / step : step;
+    const d2 = e => { const dx = e.touches[0].clientX - e.touches[1].clientX, dy = e.touches[0].clientY - e.touches[1].clientY; return Math.sqrt(dx*dx + dy*dy); };
 
-canvas.addEventListener('wheel', (e) => {
-    if (!ctrl.enabled) return;
-    e.preventDefault();
-    const dir = Math.sign(e.deltaY);
-    _zoomTarget *= dir > 0 ? 1 / ZOOM_STEP : ZOOM_STEP;
-    _zoomTarget = THREE.MathUtils.clamp(_zoomTarget, ctrl.minDistance, ctrl.maxDistance);
-}, { passive: false });
-
-// Pinch-to-zoom for globe (touch)
-let _pinchDist = 0;
-canvas.addEventListener('touchstart', (e) => {
-    if (!ctrl.enabled || e.touches.length !== 2) { _pinchDist = 0; return; }
-    const dx = e.touches[0].clientX - e.touches[1].clientX;
-    const dy = e.touches[0].clientY - e.touches[1].clientY;
-    _pinchDist = Math.sqrt(dx * dx + dy * dy);
-}, { passive: true });
-
-canvas.addEventListener('touchmove', (e) => {
-    if (!ctrl.enabled || e.touches.length !== 2 || _pinchDist === 0) return;
-    const dx = e.touches[0].clientX - e.touches[1].clientX;
-    const dy = e.touches[0].clientY - e.touches[1].clientY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const ratio = _pinchDist / dist;
-    _zoomTarget *= ratio;
-    _zoomTarget = THREE.MathUtils.clamp(_zoomTarget, ctrl.minDistance, ctrl.maxDistance);
-    _pinchDist = dist;
-}, { passive: true });
-
-canvas.addEventListener('touchend', () => { _pinchDist = 0; }, { passive: true });
-
-export function tickZoom() {
-    const v = new THREE.Vector3().subVectors(camera.position, ctrl.target);
-    const cur = v.length();
-    const next = THREE.MathUtils.lerp(cur, _zoomTarget, ZOOM_SMOOTH);
-    if (Math.abs(next - cur) < 0.0001) return;
-    v.setLength(next);
-    camera.position.copy(ctrl.target).add(v);
+    function onWheel(e) {
+        if (!ctrl.enabled) return;
+        e.preventDefault();
+        zoomTarget *= Math.sign(e.deltaY) < 0 ? zoomInMult : 1 / zoomInMult;
+        zoomTarget = THREE.MathUtils.clamp(zoomTarget, min, max);
+    }
+    function onTouchStart(e) {
+        if (!ctrl.enabled || e.touches.length !== 2) { pinchDist = 0; return; }
+        pinchDist = d2(e);
+    }
+    function onTouchMove(e) {
+        if (!ctrl.enabled || e.touches.length !== 2 || pinchDist === 0) return;
+        const dist = d2(e);
+        zoomTarget *= growsOnZoomIn ? dist / pinchDist : pinchDist / dist;
+        zoomTarget = THREE.MathUtils.clamp(zoomTarget, min, max);
+        pinchDist = dist;
+    }
+    function onTouchEnd() { pinchDist = 0; }
+    function tick() {
+        const cur  = getZoom();
+        const next = THREE.MathUtils.lerp(cur, zoomTarget, smooth);
+        if (Math.abs(next - cur) < 0.0001) return;
+        setZoom(next);
+    }
+    function setZoomTarget(v) { zoomTarget = v; }
+    return { onWheel, onTouchStart, onTouchMove, onTouchEnd, tick, setZoomTarget };
 }
+
+// Globe zoom (perspective — smaller distance = closer)
+const _globeZoom = createZoomHandler({
+    ctrl,
+    getZoom:  () => camera.position.distanceTo(ctrl.target),
+    setZoom: d => { const v = new THREE.Vector3().subVectors(camera.position, ctrl.target); v.setLength(d); camera.position.copy(ctrl.target).add(v); },
+    step: 0.92, smooth: 0.12,
+    min: ctrl.minDistance, max: ctrl.maxDistance,
+    growsOnZoomIn: false,
+});
+canvas.addEventListener('wheel',      _globeZoom.onWheel,      { passive: false });
+canvas.addEventListener('touchstart', _globeZoom.onTouchStart, { passive: true  });
+canvas.addEventListener('touchmove',  _globeZoom.onTouchMove,  { passive: true  });
+canvas.addEventListener('touchend',   _globeZoom.onTouchEnd,   { passive: true  });
+export const tickZoom = _globeZoom.tick;
 
 scene.add(new THREE.AmbientLight(0xaabbcc, 3.5));
 export const sun = new THREE.DirectionalLight(0xfff8ee, 1.5);
@@ -208,48 +226,20 @@ mapCtrl.maxZoom = 20;
 mapCtrl.enableZoom = false; // custom handler below
 mapCtrl.enabled = false;
 
-// Smooth zoom for map view (orthographic)
-let _mapZoomTarget = mapCamera.zoom;
-const MAP_ZOOM_STEP   = 0.92;
-const MAP_ZOOM_SMOOTH = 0.12;
-
-canvas.addEventListener('wheel', (e) => {
-    if (!mapCtrl.enabled) return;
-    e.preventDefault();
-    const dir = Math.sign(e.deltaY);
-    _mapZoomTarget *= dir < 0 ? 1 / MAP_ZOOM_STEP : MAP_ZOOM_STEP;
-    _mapZoomTarget = THREE.MathUtils.clamp(_mapZoomTarget, mapCtrl.minZoom, mapCtrl.maxZoom);
-}, { passive: false });
-
-// Pinch-to-zoom for map (touch)
-let _mapPinchDist = 0;
-canvas.addEventListener('touchstart', (e) => {
-    if (!mapCtrl.enabled || e.touches.length !== 2) { _mapPinchDist = 0; return; }
-    const dx = e.touches[0].clientX - e.touches[1].clientX;
-    const dy = e.touches[0].clientY - e.touches[1].clientY;
-    _mapPinchDist = Math.sqrt(dx * dx + dy * dy);
-}, { passive: true });
-
-canvas.addEventListener('touchmove', (e) => {
-    if (!mapCtrl.enabled || e.touches.length !== 2 || _mapPinchDist === 0) return;
-    const dx = e.touches[0].clientX - e.touches[1].clientX;
-    const dy = e.touches[0].clientY - e.touches[1].clientY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const ratio = dist / _mapPinchDist;
-    _mapZoomTarget *= ratio;
-    _mapZoomTarget = THREE.MathUtils.clamp(_mapZoomTarget, mapCtrl.minZoom, mapCtrl.maxZoom);
-    _mapPinchDist = dist;
-}, { passive: true });
-
-canvas.addEventListener('touchend', () => { _mapPinchDist = 0; }, { passive: true });
-
-export function tickMapZoom() {
-    const cur = mapCamera.zoom;
-    const next = THREE.MathUtils.lerp(cur, _mapZoomTarget, MAP_ZOOM_SMOOTH);
-    if (Math.abs(next - cur) < 0.0001) return;
-    mapCamera.zoom = next;
-    mapCamera.updateProjectionMatrix();
-}
+// Map zoom (orthographic — larger camera.zoom = closer)
+const _mapZoom = createZoomHandler({
+    ctrl: mapCtrl,
+    getZoom:  () => mapCamera.zoom,
+    setZoom: z => { mapCamera.zoom = z; mapCamera.updateProjectionMatrix(); },
+    step: 0.92, smooth: 0.12,
+    min: mapCtrl.minZoom, max: mapCtrl.maxZoom,
+    growsOnZoomIn: true,
+});
+canvas.addEventListener('wheel',      _mapZoom.onWheel,      { passive: false });
+canvas.addEventListener('touchstart', _mapZoom.onTouchStart, { passive: true  });
+canvas.addEventListener('touchmove',  _mapZoom.onTouchMove,  { passive: true  });
+canvas.addEventListener('touchend',   _mapZoom.onTouchEnd,   { passive: true  });
+export const tickMapZoom = _mapZoom.tick;
 
 // ── Orrery camera & controls (2D top-down solar system view) ─────────────────
 // Looks straight down the -Y axis.  Pan and zoom only — no rotation.
@@ -282,47 +272,20 @@ orreryCtrl.maxZoom        = 30;
 orreryCtrl.enableZoom     = false; // custom handler below
 orreryCtrl.enabled        = false;
 
-let _orreryZoomTarget   = orreryCamera.zoom;
-const ORRERY_ZOOM_STEP  = 0.88;
-const ORRERY_ZOOM_SMOOTH = 0.12;
-
-canvas.addEventListener('wheel', (e) => {
-    if (!orreryCtrl.enabled) return;
-    e.preventDefault();
-    const dir = Math.sign(e.deltaY);
-    _orreryZoomTarget *= dir < 0 ? 1 / ORRERY_ZOOM_STEP : ORRERY_ZOOM_STEP;
-    _orreryZoomTarget = THREE.MathUtils.clamp(_orreryZoomTarget, orreryCtrl.minZoom, orreryCtrl.maxZoom);
-}, { passive: false });
-
-// Pinch-to-zoom for orrery (touch)
-let _orreryPinchDist = 0;
-canvas.addEventListener('touchstart', (e) => {
-    if (!orreryCtrl.enabled || e.touches.length !== 2) { _orreryPinchDist = 0; return; }
-    const dx = e.touches[0].clientX - e.touches[1].clientX;
-    const dy = e.touches[0].clientY - e.touches[1].clientY;
-    _orreryPinchDist = Math.sqrt(dx * dx + dy * dy);
-}, { passive: true });
-
-canvas.addEventListener('touchmove', (e) => {
-    if (!orreryCtrl.enabled || e.touches.length !== 2 || _orreryPinchDist === 0) return;
-    const dx = e.touches[0].clientX - e.touches[1].clientX;
-    const dy = e.touches[0].clientY - e.touches[1].clientY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const ratio = dist / _orreryPinchDist;
-    _orreryZoomTarget *= ratio;
-    _orreryZoomTarget = THREE.MathUtils.clamp(_orreryZoomTarget, orreryCtrl.minZoom, orreryCtrl.maxZoom);
-    _orreryPinchDist = dist;
-}, { passive: true });
-
-canvas.addEventListener('touchend', () => { _orreryPinchDist = 0; }, { passive: true });
-
-export function tickOrreryZoom() {
-    const cur  = orreryCamera.zoom;
-    const next = THREE.MathUtils.lerp(cur, _orreryZoomTarget, ORRERY_ZOOM_SMOOTH);
-    if (Math.abs(next - cur) < 0.0001) return;
-    orreryCamera.zoom = next;
-    orreryCamera.updateProjectionMatrix();
-}
+// Orrery zoom (orthographic — larger camera.zoom = closer)
+const _orreryZoom = createZoomHandler({
+    ctrl: orreryCtrl,
+    getZoom:  () => orreryCamera.zoom,
+    setZoom: z => { orreryCamera.zoom = z; orreryCamera.updateProjectionMatrix(); },
+    step: 0.88, smooth: 0.12,
+    min: orreryCtrl.minZoom, max: orreryCtrl.maxZoom,
+    growsOnZoomIn: true,
+});
+canvas.addEventListener('wheel',      _orreryZoom.onWheel,      { passive: false });
+canvas.addEventListener('touchstart', _orreryZoom.onTouchStart, { passive: true  });
+canvas.addEventListener('touchmove',  _orreryZoom.onTouchMove,  { passive: true  });
+canvas.addEventListener('touchend',   _orreryZoom.onTouchEnd,   { passive: true  });
+export const tickOrreryZoom = _orreryZoom.tick;
 
 /**
  * Switch the renderer into orrery mode: disable planet controls, enable orrery
@@ -336,7 +299,7 @@ export function switchToOrrery() {
     // Reset orrery camera to a clean top-down framing
     orreryCamera.position.set(0, 80, 0);
     orreryCamera.lookAt(0, 0, 0);
-    _orreryZoomTarget = 1;
+    _orreryZoom.setZoomTarget(1);
     orreryCamera.zoom = 1;
     updateOrreryCameraFrustum();
     orreryCtrl.target.set(0, 0, 0);
@@ -547,7 +510,7 @@ export function startBodyTransition() {
     ctrl.target.set(0, 0, 0);
     camera.position.set(0, 1.0, 9);
     camera.lookAt(0, 0, 0);
-    _zoomTarget = Math.sqrt(0 + 0.4 * 0.4 + 2.8 * 2.8); // ~2.83, normal zoom
+    _globeZoom.setZoomTarget(Math.sqrt(0 + 0.4 * 0.4 + 2.8 * 2.8)); // ~2.83, normal zoom
     _bodyTransition = {
         t: 0,
         dur: 2.0,
@@ -592,7 +555,7 @@ let _flyTo = null; // { fromPos, toPos, t, dur }
 export function flyToSurfacePoint(nx, ny, nz, targetDist = null) {
     const dir  = new THREE.Vector3(nx, ny, nz).normalize();
     const dist = Math.max(ctrl.minDistance, Math.min(ctrl.maxDistance, targetDist ?? camera.position.length()));
-    _zoomTarget = dist; // keep tickZoom in sync after fly-to ends
+    _globeZoom.setZoomTarget(dist); // keep tickZoom in sync after fly-to ends
     _flyTo = {
         fromPos: camera.position.clone(),
         toPos:   dir.multiplyScalar(dist),

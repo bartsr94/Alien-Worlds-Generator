@@ -2,186 +2,101 @@
 // plate hover, Köppen hover, and tile selection. No geometry rebuild.
 import { state } from '../core/state.js';
 
-// Hover highlight — brighten hovered plate's cells (surgical save/restore).
-export function updateHoverHighlight() {
-    if (!state.planetMesh || !state.curData) return;
-    const colorAttr = state.planetMesh.geometry.getAttribute('color');
-    const colors = colorAttr.array;
+const HOVER_BRIGHTEN = 0.22;                             // white-tint delta for hovered cells
+const SELECTION_TINT = { r: 0.40, g: 0.35, b: 0.00 };  // warm gold tint for selected tile
 
-    // Restore previously highlighted cells
-    if (state._hoverBackup) {
-        const { offsets, saved } = state._hoverBackup;
+// Shared helper: restore the previous backup stored at state[backupKey], then
+// apply a new uniform brightness boost to all cells where matchFn(i) is true.
+// count  — number of entries to scan (mesh.numSides or fts.length)
+// isActive — false skips the apply pass (backup is still cleared)
+function applyHoverHighlight(colorAttr, count, backupKey, isActive, matchFn) {
+    const colors = colorAttr.array;
+    if (state[backupKey]) {
+        const { offsets, saved } = state[backupKey];
         for (let i = 0; i < offsets.length; i++) {
             const off = offsets[i] * 9;
             for (let j = 0; j < 9; j++) colors[off + j] = saved[i * 9 + j];
         }
-        state._hoverBackup = null;
+        state[backupKey] = null;
     }
-
-    // Apply new highlight
-    if (state.hoveredPlate >= 0) {
-        const { mesh, r_plate } = state.curData;
-        // Count cells for this plate
-        let count = 0;
-        for (let s = 0; s < mesh.numSides; s++) {
-            if (r_plate[mesh.s_begin_r(s)] === state.hoveredPlate) count++;
-        }
-        const offsets = new Int32Array(count);
-        const saved = new Float32Array(count * 9);
+    if (isActive) {
+        let c = 0;
+        for (let i = 0; i < count; i++) if (matchFn(i)) c++;
+        const offsets = new Int32Array(c);
+        const saved = new Float32Array(c * 9);
         let idx = 0;
-        for (let s = 0; s < mesh.numSides; s++) {
-            if (r_plate[mesh.s_begin_r(s)] === state.hoveredPlate) {
-                offsets[idx] = s;
-                const off = s * 9;
+        for (let i = 0; i < count; i++) {
+            if (matchFn(i)) {
+                offsets[idx] = i;
+                const off = i * 9;
                 for (let j = 0; j < 9; j++) saved[idx * 9 + j] = colors[off + j];
                 for (let j = 0; j < 3; j++) {
-                    colors[off + j*3]     = Math.min(1, colors[off + j*3]     + 0.22);
-                    colors[off + j*3 + 1] = Math.min(1, colors[off + j*3 + 1] + 0.22);
-                    colors[off + j*3 + 2] = Math.min(1, colors[off + j*3 + 2] + 0.22);
+                    colors[off + j*3]     = Math.min(1, colors[off + j*3]     + HOVER_BRIGHTEN);
+                    colors[off + j*3 + 1] = Math.min(1, colors[off + j*3 + 1] + HOVER_BRIGHTEN);
+                    colors[off + j*3 + 2] = Math.min(1, colors[off + j*3 + 2] + HOVER_BRIGHTEN);
                 }
                 idx++;
             }
         }
-        state._hoverBackup = { offsets, saved };
+        state[backupKey] = { offsets, saved };
     }
     colorAttr.needsUpdate = true;
+}
+
+// Hover highlight — brighten hovered plate's cells (surgical save/restore).
+export function updateHoverHighlight() {
+    if (!state.planetMesh || !state.curData) return;
+    const { mesh, r_plate } = state.curData;
+    applyHoverHighlight(
+        state.planetMesh.geometry.getAttribute('color'),
+        mesh.numSides,
+        '_hoverBackup',
+        state.hoveredPlate >= 0,
+        s => r_plate[mesh.s_begin_r(s)] === state.hoveredPlate,
+    );
 }
 
 // Hover highlight for map mesh (surgical save/restore).
 export function updateMapHoverHighlight() {
     if (!state.mapMesh || !state.curData || !state.mapFaceToSide) return;
-    const colorAttr = state.mapMesh.geometry.getAttribute('color');
-    const colors = colorAttr.array;
-
-    // Restore previously highlighted cells
-    if (state._mapHoverBackup) {
-        const { offsets, saved } = state._mapHoverBackup;
-        for (let i = 0; i < offsets.length; i++) {
-            const off = offsets[i] * 9;
-            for (let j = 0; j < 9; j++) colors[off + j] = saved[i * 9 + j];
-        }
-        state._mapHoverBackup = null;
-    }
-
-    // Apply new highlight
-    if (state.hoveredPlate >= 0) {
-        const { mesh, r_plate } = state.curData;
-        const fts = state.mapFaceToSide;
-        // Count faces for this plate
-        let count = 0;
-        for (let f = 0; f < fts.length; f++) {
-            if (r_plate[mesh.s_begin_r(fts[f])] === state.hoveredPlate) count++;
-        }
-        const offsets = new Int32Array(count);
-        const saved = new Float32Array(count * 9);
-        let idx = 0;
-        for (let f = 0; f < fts.length; f++) {
-            if (r_plate[mesh.s_begin_r(fts[f])] === state.hoveredPlate) {
-                offsets[idx] = f;
-                const off = f * 9;
-                for (let j = 0; j < 9; j++) saved[idx * 9 + j] = colors[off + j];
-                for (let j = 0; j < 3; j++) {
-                    colors[off + j*3]     = Math.min(1, colors[off + j*3]     + 0.22);
-                    colors[off + j*3 + 1] = Math.min(1, colors[off + j*3 + 1] + 0.22);
-                    colors[off + j*3 + 2] = Math.min(1, colors[off + j*3 + 2] + 0.22);
-                }
-                idx++;
-            }
-        }
-        state._mapHoverBackup = { offsets, saved };
-    }
-    colorAttr.needsUpdate = true;
+    const { mesh, r_plate } = state.curData;
+    const fts = state.mapFaceToSide;
+    applyHoverHighlight(
+        state.mapMesh.geometry.getAttribute('color'),
+        fts.length,
+        '_mapHoverBackup',
+        state.hoveredPlate >= 0,
+        f => r_plate[mesh.s_begin_r(fts[f])] === state.hoveredPlate,
+    );
 }
 
 // Köppen legend hover highlight — brighten cells matching hovered climate class (globe).
 export function updateKoppenHoverHighlight() {
     if (!state.planetMesh || !state.curData) return;
-    const colorAttr = state.planetMesh.geometry.getAttribute('color');
-    const colors = colorAttr.array;
-
-    // Restore previously highlighted cells
-    if (state._koppenHoverBackup) {
-        const { offsets, saved } = state._koppenHoverBackup;
-        for (let i = 0; i < offsets.length; i++) {
-            const off = offsets[i] * 9;
-            for (let j = 0; j < 9; j++) colors[off + j] = saved[i * 9 + j];
-        }
-        state._koppenHoverBackup = null;
-    }
-
-    if (state.hoveredKoppen >= 0) {
-        const { mesh, debugLayers } = state.curData;
-        const koppenArr = debugLayers && debugLayers.koppen;
-        if (!koppenArr) { colorAttr.needsUpdate = true; return; }
-        let count = 0;
-        for (let s = 0; s < mesh.numSides; s++) {
-            if (koppenArr[mesh.s_begin_r(s)] === state.hoveredKoppen) count++;
-        }
-        const offsets = new Int32Array(count);
-        const saved = new Float32Array(count * 9);
-        let idx = 0;
-        for (let s = 0; s < mesh.numSides; s++) {
-            if (koppenArr[mesh.s_begin_r(s)] === state.hoveredKoppen) {
-                offsets[idx] = s;
-                const off = s * 9;
-                for (let j = 0; j < 9; j++) saved[idx * 9 + j] = colors[off + j];
-                for (let j = 0; j < 3; j++) {
-                    colors[off + j*3]     = Math.min(1, colors[off + j*3]     + 0.22);
-                    colors[off + j*3 + 1] = Math.min(1, colors[off + j*3 + 1] + 0.22);
-                    colors[off + j*3 + 2] = Math.min(1, colors[off + j*3 + 2] + 0.22);
-                }
-                idx++;
-            }
-        }
-        state._koppenHoverBackup = { offsets, saved };
-    }
-    colorAttr.needsUpdate = true;
+    const { mesh, debugLayers } = state.curData;
+    const koppenArr = debugLayers && debugLayers.koppen;
+    applyHoverHighlight(
+        state.planetMesh.geometry.getAttribute('color'),
+        mesh.numSides,
+        '_koppenHoverBackup',
+        state.hoveredKoppen >= 0 && !!koppenArr,
+        s => koppenArr[mesh.s_begin_r(s)] === state.hoveredKoppen,
+    );
 }
 
 // Köppen legend hover highlight for map mesh (surgical save/restore).
 export function updateMapKoppenHoverHighlight() {
     if (!state.mapMesh || !state.curData || !state.mapFaceToSide) return;
-    const colorAttr = state.mapMesh.geometry.getAttribute('color');
-    const colors = colorAttr.array;
-
-    // Restore previously highlighted cells
-    if (state._mapKoppenHoverBackup) {
-        const { offsets, saved } = state._mapKoppenHoverBackup;
-        for (let i = 0; i < offsets.length; i++) {
-            const off = offsets[i] * 9;
-            for (let j = 0; j < 9; j++) colors[off + j] = saved[i * 9 + j];
-        }
-        state._mapKoppenHoverBackup = null;
-    }
-
-    if (state.hoveredKoppen >= 0) {
-        const { mesh, debugLayers } = state.curData;
-        const koppenArr = debugLayers && debugLayers.koppen;
-        if (!koppenArr) { colorAttr.needsUpdate = true; return; }
-        const fts = state.mapFaceToSide;
-        let count = 0;
-        for (let f = 0; f < fts.length; f++) {
-            if (koppenArr[mesh.s_begin_r(fts[f])] === state.hoveredKoppen) count++;
-        }
-        const offsets = new Int32Array(count);
-        const saved = new Float32Array(count * 9);
-        let idx = 0;
-        for (let f = 0; f < fts.length; f++) {
-            if (koppenArr[mesh.s_begin_r(fts[f])] === state.hoveredKoppen) {
-                offsets[idx] = f;
-                const off = f * 9;
-                for (let j = 0; j < 9; j++) saved[idx * 9 + j] = colors[off + j];
-                for (let j = 0; j < 3; j++) {
-                    colors[off + j*3]     = Math.min(1, colors[off + j*3]     + 0.22);
-                    colors[off + j*3 + 1] = Math.min(1, colors[off + j*3 + 1] + 0.22);
-                    colors[off + j*3 + 2] = Math.min(1, colors[off + j*3 + 2] + 0.22);
-                }
-                idx++;
-            }
-        }
-        state._mapKoppenHoverBackup = { offsets, saved };
-    }
-    colorAttr.needsUpdate = true;
+    const { mesh, debugLayers } = state.curData;
+    const koppenArr = debugLayers && debugLayers.koppen;
+    const fts = state.mapFaceToSide;
+    applyHoverHighlight(
+        state.mapMesh.geometry.getAttribute('color'),
+        fts.length,
+        '_mapKoppenHoverBackup',
+        state.hoveredKoppen >= 0 && !!koppenArr,
+        f => koppenArr[mesh.s_begin_r(fts[f])] === state.hoveredKoppen,
+    );
 }
 
 // Selection highlight — warm gold tint on a single clicked region (globe + map).
@@ -208,9 +123,9 @@ export function updateSelectionHighlight(region) {
                 const off = s * 9;
                 for (let j = 0; j < 9; j++) saved[idx * 9 + j] = colors[off + j];
                 for (let j = 0; j < 3; j++) {
-                    colors[off + j*3]     = Math.min(1, colors[off + j*3]     + 0.40);
-                    colors[off + j*3 + 1] = Math.min(1, colors[off + j*3 + 1] + 0.35);
-                    colors[off + j*3 + 2] = Math.min(1, colors[off + j*3 + 2] + 0.00);
+                    colors[off + j*3]     = Math.min(1, colors[off + j*3]     + SELECTION_TINT.r);
+                    colors[off + j*3 + 1] = Math.min(1, colors[off + j*3 + 1] + SELECTION_TINT.g);
+                    colors[off + j*3 + 2] = Math.min(1, colors[off + j*3 + 2] + SELECTION_TINT.b);
                 }
                 idx++;
             }
@@ -239,9 +154,9 @@ export function updateSelectionHighlight(region) {
                     const off = f * 9;
                     for (let j = 0; j < 9; j++) saved[idx * 9 + j] = mapColors[off + j];
                     for (let j = 0; j < 3; j++) {
-                        mapColors[off + j*3]     = Math.min(1, mapColors[off + j*3]     + 0.40);
-                        mapColors[off + j*3 + 1] = Math.min(1, mapColors[off + j*3 + 1] + 0.35);
-                        mapColors[off + j*3 + 2] = Math.min(1, mapColors[off + j*3 + 2] + 0.00);
+                        mapColors[off + j*3]     = Math.min(1, mapColors[off + j*3]     + SELECTION_TINT.r);
+                        mapColors[off + j*3 + 1] = Math.min(1, mapColors[off + j*3 + 1] + SELECTION_TINT.g);
+                        mapColors[off + j*3 + 2] = Math.min(1, mapColors[off + j*3 + 2] + SELECTION_TINT.b);
                     }
                     idx++;
                 }

@@ -2,7 +2,7 @@
 // Computes pressure fields and wind vectors for summer and winter seasons.
 
 import { elevToHeightKm } from '../core/elev-scale.js';
-import { smoothField, percentile, smoothstep } from './climate-util.js';
+import { smoothField, percentile, smoothstep, EARTH_RADIUS_KM } from './climate-util.js';
 
 const DEG = Math.PI / 180;
 const RAD = 180 / Math.PI;
@@ -388,7 +388,7 @@ function pressureToWind(r_gradE, r_gradN, r_sinLat,
  */
 export function computeWind(mesh, r_xyz, r_elevation, plateIsOcean, r_plate, noise, axialTilt = 23.5, params = null) {
     const numRegions = mesh.numRegions;
-    const avgEdgeKm = (Math.PI * 6371) / Math.sqrt(numRegions);
+    const avgEdgeKm = (Math.PI * EARTH_RADIUS_KM) / Math.sqrt(numRegions);
     const tiltRad = axialTilt * DEG;
     const timing = [];
 

@@ -47,8 +47,13 @@ export function initExportModal() {
         closeModal();
         showBuildOverlay();
         onProgress(0, 'Preparing export...');
-        await exportMap(type, w, onProgress);
-        hideBuildOverlay();
+        try {
+            await exportMap(type, w, onProgress);
+        } catch (err) {
+            console.error('Export failed:', err);
+        } finally {
+            hideBuildOverlay();
+        }
     });
 
     // Export All — downloads Satellite, Climate, Heightmap, and Land Mask
@@ -71,7 +76,12 @@ export function initExportModal() {
             await new Promise(resolve => computeClimateViaWorker(onProgress, resolve));
         }
 
-        await exportMapBatch(EXPORT_ALL_TYPES, w, onProgress);
-        hideBuildOverlay();
+        try {
+            await exportMapBatch(EXPORT_ALL_TYPES, w, onProgress);
+        } catch (err) {
+            console.error('Batch export failed:', err);
+        } finally {
+            hideBuildOverlay();
+        }
     });
 }

@@ -16,6 +16,7 @@ import { getTier, getTierFromPop, createColony, colonyProductionRates, foundingC
     BUILDING_MAINTENANCE, BUILDING_MAINTENANCE_RESOURCE,
     getHousingCap, canAdvanceTier } from './colony.js';
 import { getGameDays } from './game-clock.js';
+import { formatPop } from './core/format.js';
 
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -284,9 +285,7 @@ function buildColonySectionHTML(region) {
         const inBootstrap = now < colony.bootstrapEndDay;
 
         const TIER_LABELS = { outpost: 'Outpost', settlement: 'Settlement', colony: 'Colony', city: 'City', megacity: 'Megacity' };
-        const pop = colony.population >= 1e6 ? (colony.population / 1e6).toFixed(1) + 'M'
-                  : colony.population >= 1e3 ? Math.round(colony.population / 1e3) + 'K'
-                  : colony.population.toLocaleString();
+        const pop = formatPop(colony.population);
 
         const starvHTML = colony.starvationTicks > 0
             ? `<div class="tp-starvation-warn">⚠ Starving (${colony.starvationTicks}/3 ticks) — food shortage</div>`
@@ -552,9 +551,7 @@ ${costRows}
     const inBootstrap = now < colony.bootstrapEndDay;
     const housingCap  = getHousingCap(colony.buildings);
 
-    const pop = colony.population >= 1e6 ? (colony.population / 1e6).toFixed(1) + 'M'
-              : colony.population >= 1e3 ? Math.round(colony.population / 1e3) + 'K'
-              : colony.population.toLocaleString();
+    const pop = formatPop(colony.population);
 
     const starvHTML = colony.starvationTicks > 0
         ? `<div class="tp-starvation-warn">\u26a0 Starving (${colony.starvationTicks}/3 ticks) \u2014 food shortage</div>\n`
@@ -610,7 +607,7 @@ ${rows.map(([icon, prod, m, net]) => {
   <span class="cv-name" id="cv-name" contenteditable="false" spellcheck="false">${htmlEsc(colony.name)}</span>
   <button class="cv-close-btn" id="cv-close-btn">&times;</button>
 </div>
-<div class="cv-tier-line">${TIER_LABELS[tier.name] ?? tier.name} &middot; Pop. ${pop} / ${housingCap >= 1e6 ? (housingCap / 1e6).toFixed(1) + 'M' : housingCap >= 1e3 ? Math.round(housingCap / 1e3) + 'K' : housingCap}</div>
+<div class="cv-tier-line">${TIER_LABELS[tier.name] ?? tier.name} &middot; Pop. ${pop} / ${formatPop(housingCap)}</div>
 ${starvHTML}${econHTML}
 ${buildBuildingsHTML(colony, pool)}`;
 }

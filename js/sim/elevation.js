@@ -3,6 +3,7 @@
 
 import { makeRandInt, makeRng } from '../core/rng.js';
 import { SimplexNoise } from '../core/simplex-noise.js';
+import { bfsDistField } from './climate-util.js';
 
 // ----------------------------------------------------------------
 //  Euler-pole velocity helper
@@ -210,6 +211,8 @@ export function expandRegions(mesh, regions, steps) {
     return expanded;
 }
 
+// BFS distance field is imported from climate-util.js
+
 // ----------------------------------------------------------------
 //  Elevation assignment — combines distance fields, stress, noise
 // ----------------------------------------------------------------
@@ -401,92 +404,26 @@ export function assignElevation(mesh, r_xyz, plateIsOcean, r_plate, plateVec, pl
         }
     }
 
-    // ---- Rift BFS (structured graben profile for divergent continent-continent boundaries) ----
+    // ---- Rift / ridge / fracture BFS distance fields ----
     const RIFT_HALF_WIDTH_BASE = 4;
     const riftHalfWidth = Math.max(2, Math.round(RIFT_HALF_WIDTH_BASE * scaleFactor));
-    const riftDist = new Float32Array(numRegions);
-    riftDist.fill(Infinity);
-    const riftSeeds = [];
-    for (let r = 0; r < numRegions; r++) {
-        if (r_boundaryType[r] === 2 && !r_hasOcean[r]) {
-            riftSeeds.push(r);
-            riftDist[r] = 0;
-        }
-    }
-    {
-        let qi = 0;
-        while (qi < riftSeeds.length) {
-            const r = riftSeeds[qi++];
-            const nd = riftDist[r] + 1;
-            if (nd > riftHalfWidth) continue;
-            const plate = r_plate[r];
-            for (let ni = adjOffset[r], niEnd = adjOffset[r + 1]; ni < niEnd; ni++) {
-                const nr = adjList[ni];
-                if (nd < riftDist[nr] && r_plate[nr] === plate && !r_isOcean[nr]) {
-                    riftDist[nr] = nd;
-                    riftSeeds.push(nr);
-                }
-            }
-        }
-    }
+    const riftDist = bfsDistField(numRegions, adjOffset, adjList, riftHalfWidth,
+        r => r_boundaryType[r] === 2 && !r_hasOcean[r],
+        (r, nr) => r_plate[nr] === r_plate[r] && !r_isOcean[nr]);
     const riftNoise = new SimplexNoise(seed + 419);
     _timing.push({ stage: 'Coast boundary + rift BFS', ms: performance.now() - _t0 }); _t0 = performance.now();
 
-    // ---- Mid-ocean ridge BFS (wider ridge feature from divergent ocean-ocean boundaries) ----
     const RIDGE_HALF_WIDTH_BASE = 4;
     const ridgeHalfWidth = Math.max(2, Math.round(RIDGE_HALF_WIDTH_BASE * scaleFactor));
-    const ridgeDist = new Float32Array(numRegions);
-    ridgeDist.fill(Infinity);
-    const ridgeSeeds = [];
-    for (let r = 0; r < numRegions; r++) {
-        if (r_boundaryType[r] === 2 && r_bothOcean[r]) {
-            ridgeSeeds.push(r);
-            ridgeDist[r] = 0;
-        }
-    }
-    {
-        let qi = 0;
-        while (qi < ridgeSeeds.length) {
-            const r = ridgeSeeds[qi++];
-            const nd = ridgeDist[r] + 1;
-            if (nd > ridgeHalfWidth) continue;
-            for (let ni = adjOffset[r], niEnd = adjOffset[r + 1]; ni < niEnd; ni++) {
-                const nr = adjList[ni];
-                if (nd < ridgeDist[nr] && r_isOcean[nr]) {
-                    ridgeDist[nr] = nd;
-                    ridgeSeeds.push(nr);
-                }
-            }
-        }
-    }
+    const ridgeDist = bfsDistField(numRegions, adjOffset, adjList, ridgeHalfWidth,
+        r => r_boundaryType[r] === 2 && r_bothOcean[r],
+        (_r, nr) => r_isOcean[nr]);
 
-    // ---- Oceanic fracture zone BFS (transform ocean-ocean boundaries) ----
     const FRACTURE_HALF_WIDTH_BASE = 3;
     const fractureHalfWidth = Math.max(2, Math.round(FRACTURE_HALF_WIDTH_BASE * scaleFactor));
-    const fractureDist = new Float32Array(numRegions);
-    fractureDist.fill(Infinity);
-    const fractureSeeds = [];
-    for (let r = 0; r < numRegions; r++) {
-        if (r_boundaryType[r] === 3 && r_bothOcean[r]) {
-            fractureSeeds.push(r);
-            fractureDist[r] = 0;
-        }
-    }
-    {
-        let qi = 0;
-        while (qi < fractureSeeds.length) {
-            const r = fractureSeeds[qi++];
-            const nd = fractureDist[r] + 1;
-            if (nd > fractureHalfWidth) continue;
-            for (let ni = adjOffset[r], niEnd = adjOffset[r + 1]; ni < niEnd; ni++) {
-                const nr = adjList[ni];
-                if (nd < fractureDist[nr] && r_isOcean[nr]) {
-                    fractureDist[nr] = nd;
-                    fractureSeeds.push(nr);
-                }
-            }
-        }
-    }
+    const fractureDist = bfsDistField(numRegions, adjOffset, adjList, fractureHalfWidth,
+        r => r_boundaryType[r] === 3 && r_bothOcean[r],
+        (_r, nr) => r_isOcean[nr]);
 
     // ---- Back-arc basin BFS (depression behind subduction zones) ----
     // Seeds: overriding side of any convergent boundary involving ocean.

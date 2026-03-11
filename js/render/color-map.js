@@ -137,6 +137,22 @@ function earthBiomeColor(koppenId, elevation) {
 
 // ---------------------------------------------------------------------------
 // Alternate world-type palettes
+// --- Shared palette helpers ------------------------------------------------
+
+/** Linear interpolation between two RGB triples [r,g,b]. */
+function lerpColor(t, ca, cb) {
+    return [ca[0]+t*(cb[0]-ca[0]), ca[1]+t*(cb[1]-ca[1]), ca[2]+t*(cb[2]-ca[2])];
+}
+
+/**
+ * Standard 2-stop ocean basin ramp used by all world-type palettes:
+ * flat deep-water color below -0.40, then lerp up to shore colour by elevation 0.
+ */
+function basinRamp(elevation, deep, shore) {
+    if (elevation < -0.40) return deep;
+    return lerpColor((elevation + 0.40) / 0.40, deep, shore);
+}
+
 // ---------------------------------------------------------------------------
 
 /**
@@ -156,15 +172,15 @@ function barrenColor(elevation) {
     }
     if (elevation < -0.10) {
         const t = (elevation + 0.40) / 0.30;
-        if (isHot)  return [0.14 + t * 0.14, 0.12 + t * 0.12, 0.09 + t * 0.09];
-        if (isCold) return [0.05 + t * 0.10, 0.05 + t * 0.10, 0.08 + t * 0.10];
-        return [0.06 + t * 0.10, 0.05 + t * 0.10, 0.06 + t * 0.09];
+        if (isHot)  return lerpColor(t, [0.14, 0.12, 0.09], [0.28, 0.24, 0.18]);
+        if (isCold) return lerpColor(t, [0.05, 0.05, 0.08], [0.15, 0.15, 0.18]);
+        return lerpColor(t, [0.06, 0.05, 0.06], [0.16, 0.15, 0.15]);
     }
     if (elevation < 0.00) {
         const t = (elevation + 0.10) / 0.10;
-        if (isHot)  return [0.28 + t * 0.14, 0.24 + t * 0.12, 0.18 + t * 0.10];
-        if (isCold) return [0.15 + t * 0.08, 0.15 + t * 0.07, 0.18 + t * 0.08];
-        return [0.16 + t * 0.08, 0.15 + t * 0.07, 0.15 + t * 0.07];
+        if (isHot)  return lerpColor(t, [0.28, 0.24, 0.18], [0.42, 0.36, 0.28]);
+        if (isCold) return lerpColor(t, [0.15, 0.15, 0.18], [0.23, 0.22, 0.26]);
+        return lerpColor(t, [0.16, 0.15, 0.15], [0.24, 0.22, 0.22]);
     }
     const hKm = elevToHeightKm(elevation);
     if (isHot) {
@@ -196,20 +212,10 @@ function aridColor(koppenId, elevation) {
     const isCold = _baseTemp < -110;   // only truly frigid worlds (not Mars at -60°C)
 
     if (elevation <= 0) {
-        if (isHot) {
-            if (elevation < -0.40) return [0.28, 0.18, 0.08];
-            const t = (elevation + 0.40) / 0.40;
-            return [0.28 + t * 0.28, 0.18 + t * 0.20, 0.08 + t * 0.14];
-        }
-        if (isCold) {
-            if (elevation < -0.40) return [0.24, 0.16, 0.12];
-            const t = (elevation + 0.40) / 0.40;
-            return [0.24 + t * 0.22, 0.16 + t * 0.16, 0.12 + t * 0.10];
-        }
+        if (isHot)  return basinRamp(elevation, [0.28, 0.18, 0.08], [0.56, 0.38, 0.22]);
+        if (isCold) return basinRamp(elevation, [0.24, 0.16, 0.12], [0.46, 0.32, 0.22]);
         // Standard Mars-like rust seabed
-        if (elevation < -0.40) return [0.30, 0.18, 0.10];
-        const t = (elevation + 0.40) / 0.40;
-        return [0.30 + t * 0.24, 0.18 + t * 0.18, 0.10 + t * 0.14];
+        return basinRamp(elevation, [0.30, 0.18, 0.10], [0.54, 0.36, 0.24]);
     }
     const hKm = elevToHeightKm(elevation);
     const t = Math.min(1, hKm / 5);
@@ -256,22 +262,12 @@ function iceColor(koppenId, elevation) {
     const isLowHydro  = _hydrosphere <= 1;
 
     if (elevation <= 0) {
-        if (isHighHydro) {
-            // Europa-like: thick frozen ocean — midnight blue deep, teal-blue shallow
-            if (elevation < -0.40) return [0.18, 0.26, 0.42];
-            const t = (elevation + 0.40) / 0.40;
-            return [0.18 + t * 0.44, 0.26 + t * 0.42, 0.42 + t * 0.38];
-        }
-        if (isLowHydro) {
-            // Frost world: shallow frozen patches over dark rock
-            if (elevation < -0.40) return [0.18, 0.16, 0.18];
-            const t = (elevation + 0.40) / 0.40;
-            return [0.18 + t * 0.30, 0.16 + t * 0.28, 0.18 + t * 0.30];
-        }
+        // Europa-like: thick frozen ocean — midnight blue deep, teal-blue shallow
+        if (isHighHydro) return basinRamp(elevation, [0.18, 0.26, 0.42], [0.62, 0.68, 0.80]);
+        // Frost world: shallow frozen patches over dark rock
+        if (isLowHydro)  return basinRamp(elevation, [0.18, 0.16, 0.18], [0.48, 0.44, 0.48]);
         // Standard ice world ocean
-        if (elevation < -0.40) return [0.28, 0.36, 0.52];
-        const t = (elevation + 0.40) / 0.40;
-        return [0.28 + t * 0.36, 0.36 + t * 0.30, 0.52 + t * 0.24];
+        return basinRamp(elevation, [0.28, 0.36, 0.52], [0.64, 0.66, 0.76]);
     }
     const hKm = elevToHeightKm(elevation);
     const t   = Math.min(1, hKm / 5);
@@ -330,11 +326,7 @@ function alienColor(koppenId, elevation) {
 
     if (isVenus) {
         // Venus-type: sulfurous hellscape — no liquid, no blue at all
-        if (elevation <= 0) {
-            if (elevation < -0.40) return [0.22, 0.14, 0.06];
-            const t = (elevation + 0.40) / 0.40;
-            return [0.22 + t * 0.28, 0.14 + t * 0.20, 0.06 + t * 0.12];
-        }
+        if (elevation <= 0) return basinRamp(elevation, [0.22, 0.14, 0.06], [0.50, 0.34, 0.18]);
         const hKm = elevToHeightKm(elevation);
         const t   = Math.min(1, hKm / 5);
         // Lowlands: pale ochre-cream; peaks: bright sulfurous yellow-white
@@ -346,12 +338,7 @@ function alienColor(koppenId, elevation) {
 
     if (isTitan) {
         // Titan-type: murky methane seas, amber-rust highlands
-        if (elevation <= 0) {
-            // Methane seas: near-black in deeps, dark amber-brown at shore
-            if (elevation < -0.40) return [0.08, 0.05, 0.04];
-            const t = (elevation + 0.40) / 0.40;
-            return [0.08 + t * 0.18, 0.05 + t * 0.14, 0.04 + t * 0.08];
-        }
+        if (elevation <= 0) return basinRamp(elevation, [0.08, 0.05, 0.04], [0.26, 0.19, 0.12]);
         const hKm = elevToHeightKm(elevation);
         const t   = Math.min(1, hKm / 5);
         // Dark amber lowlands → deep brick-red mid → pale dusty tan peaks
@@ -362,11 +349,7 @@ function alienColor(koppenId, elevation) {
     }
 
     // Generic alien (mid-temperature): indigo-to-amber exotic seas, ochre-rust land
-    if (elevation <= 0) {
-        if (elevation < -0.40) return [0.10, 0.07, 0.20];
-        const t = (elevation + 0.40) / 0.40;
-        return [0.10 + t * 0.34, 0.07 + t * 0.22, 0.20 + t * 0.12];
-    }
+    if (elevation <= 0) return basinRamp(elevation, [0.10, 0.07, 0.20], [0.44, 0.29, 0.32]);
     const hKm = elevToHeightKm(elevation);
     const t   = Math.min(1, hKm / 5);
     // Ground: amber-orange lowlands → rust-red mid → pale ochre peaks

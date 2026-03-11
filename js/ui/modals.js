@@ -1,7 +1,7 @@
 // Tutorial modal and power-user survey tracker.
 import { state } from '../core/state.js';
 
-/** Wire up the three-step tutorial modal. */
+/** Wire up the five-step tutorial modal. */
 export function initTutorial() {
     const overlay  = document.getElementById('tutorialOverlay');
     const card     = document.getElementById('tutorialCard');
@@ -86,13 +86,6 @@ export function initSurveyTracker() {
 
     if (localStorage.getItem(LS_DISMISSED)) return;
 
-    // Simple hash so we don't store raw timestamps
-    function hash(str) {
-        let h = 5381;
-        for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
-        return h.toString(36);
-    }
-
     let data;
     try { data = JSON.parse(localStorage.getItem(LS)) || {}; } catch (_) { data = {}; }
     const hours = data.h || 0;
@@ -100,9 +93,9 @@ export function initSurveyTracker() {
     const lastH = data.lh || '';
     const lastD = data.ld || '';
 
-    const now = new Date();
-    const hourKey = hash(now.getFullYear() + '-' + now.getMonth() + '-' + now.getDate() + 'T' + now.getHours());
-    const dayKey  = hash(now.getFullYear() + '-' + now.getMonth() + '-' + now.getDate());
+    // Epoch-based buckets: no readable timestamps stored, no custom hash needed
+    const hourKey = Math.floor(Date.now() / 3_600_000).toString(36);
+    const dayKey  = Math.floor(Date.now() / 86_400_000).toString(36);
 
     const newHours = hourKey !== lastH ? hours + 1 : hours;
     const newDays  = dayKey  !== lastD ? days  + 1 : days;

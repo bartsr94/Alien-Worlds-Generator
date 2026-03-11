@@ -2,7 +2,7 @@
 // Wind belts drive zonal currents; continental shelves deflect them into gyres.
 // Warmth is classified geographically: western coasts = warm, eastern coasts = cold.
 
-import { smoothstep, makeItczLookup, percentile } from './climate-util.js';
+import { smoothstep, makeItczLookup, percentile, EARTH_RADIUS_KM } from './climate-util.js';
 
 const DEG = Math.PI / 180;
 
@@ -217,7 +217,7 @@ export function computeOceanCurrents(mesh, r_xyz, r_elevation, windResult, param
             _oceanTiming: [{ stage: 'Ocean: skipped (no liquid ocean)', ms: 0 }],
         };
     }
-    const avgEdgeKm = (Math.PI * 6371) / Math.sqrt(numRegions);
+    const avgEdgeKm = (Math.PI * EARTH_RADIUS_KM) / Math.sqrt(numRegions);
     const timing = [];
 
     const { r_lat, r_sinLat, r_isLand,
@@ -431,7 +431,6 @@ export function computeOceanCurrents(mesh, r_xyz, r_elevation, windResult, param
             r_speed[r] = Math.min(1, r_speed[r] / p95);
         }
 
-        console.log(`[Ocean ${name}] coastThreshold=${coastThreshold}, warmthRange=${warmthRange}, p95=${p95.toExponential(3)}, oceanCells=${oceanCount}`);
         timing.push({ stage: `Ocean: warmth + normalize (${name})`, ms: performance.now() - t0 });
 
         result[`r_ocean_current_east_${name}`] = currentE;
