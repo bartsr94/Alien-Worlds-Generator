@@ -741,7 +741,7 @@ test('two-colony tick: both colonies contribute to pool', () => {
   const expectedMetals = r0.metals + r1.metals; // tick doesn't deduct metals maint (known bug)
 
   assertEqual(pool.food, Math.max(0, expectedFood),
-    'pool food must equal sum of both colonies' net food');
+    "pool food must equal sum of both colonies' net food");
   assertEqual(pool.metals, expectedMetals,
     'pool metals must include production from BOTH colonies');
 });

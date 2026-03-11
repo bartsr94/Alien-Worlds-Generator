@@ -26,7 +26,7 @@ import { CLIMATE_LAYERS, switchVisualization, syncTabsToLayer, updateLegend, onP
 import { WORLD_PRESETS, applyPreset, updatePlanetWarnings } from './ui/world-preset.js';
 import { initExportModal } from './ui/export-modal.js';
 import { initTutorial, initSurveyTracker } from './ui/modals.js';
-import { getGameDays, tickClock, getGameDate, isPaused } from './game-clock.js';
+import { getGameDays, tickClock, getGameDate, isPaused, togglePause } from './game-clock.js';
 import { STARTING_POOL, colonyProductionRates, maintenanceCost, getTier as getColonyTier, getHousingCap, getStorageContribution } from './colony.js';
 
 state.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
@@ -457,6 +457,16 @@ document.addEventListener('keydown', (e) => {
         e.stopPropagation();
     }
 }, true); // capture phase so it fires before Three.js controls
+
+// Space bar: toggle pause (skip when typing in an input/textarea)
+document.addEventListener('keydown', (e) => {
+    if (e.key !== ' ') return;
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+    e.preventDefault();
+    togglePause();
+    document.getElementById('btnPause')?.classList.toggle('paused-state', isPaused());
+});
 
 // View-mode checkboxes
 document.getElementById('chkPlates').addEventListener('change', updateMeshColors);
